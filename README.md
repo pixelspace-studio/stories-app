@@ -9,18 +9,15 @@ A powerful desktop application for macOS that converts voice to text using OpenA
 - **Automatic language detection** and multi-language support
 - **Smart auto-paste** - automatically pastes transcriptions where you were typing
 - **Transcription history** with local SQLite database
-- **Global shortcuts** - Cmd+Shift+R (record) & Cmd+Control+V (copy latest)
+- **Global shortcuts** - Configurable shortcuts for recording & copying transcriptions
 - **Floating widget** - always-on-top draggable recording interface
 - **Audio archiving** - optional local storage of recordings for playback and download
 - **Audio download** - download recordings as WebM (or MP3 if FFmpeg is installed)
 - **Custom dictionary** - add custom words/names for accurate transcriptions
 - **Settings panel** - API key management and audio preferences
-- **Professional theme system** - consistent color palette and design
-- **Minimalist interface** designed for maximum productivity
 - **Toast notifications** - instant visual feedback for all actions
 - **Enhanced security** - Apple Events permissions for reliable auto-paste
 - **Multi-screen support** - widget follows cursor across displays
-- **Optimized performance** - singleton configuration manager reduces memory usage
 - **Menu bar status icon** - visual states (idle, recording, processing, ready) with quick actions
 
 ## Quick Start
@@ -122,7 +119,7 @@ For detailed project structure, see the repository structure.
 ## Keyboard Shortcuts
 
 ### Global Shortcuts (work system-wide)
-- **Cmd+Shift+R**: Start/stop recording
+- **Cmd+Shift+R**: Start/stop recording (configurable)
 - **Cmd+Control+V**: Copy latest transcription to clipboard
 
 ## Performance
@@ -248,7 +245,7 @@ Add custom words, names, or technical terms:
 **Example use cases:**
 - Company names: "PixelSpace"
 - Technical terms: "React.js", "TypeScript"
-- Personal names: "Yann LeCun"
+- Personal names: "María", "João"
 
 ### Audio Storage
 Manage your local audio files:
@@ -329,7 +326,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/pixelspace-studio/stories-app/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/pixelspace-studio/stories-app/discussions)
 
 ---
 
