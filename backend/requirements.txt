@@ -3,5 +3,5 @@ Flask-CORS==4.0.0
 openai==1.109.1
 python-dotenv==1.0.0
 cryptography==41.0.7
-requests==2.31.0
+requests==2.32.4
 pydub==0.25.1
