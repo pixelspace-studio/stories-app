@@ -7,8 +7,8 @@ If you discover a security vulnerability in Stories, please report it responsibl
 **DO NOT** open a public GitHub issue for security vulnerabilities.
 
 Instead, please report security issues via:
-- **Email:** security@pixelspace.com
 - **Private Security Advisory:** Use GitHub's "Security" tab to create a private report
+- **Contact:** @Floristeady directly on GitHub
 
 We will respond to security reports within **48 hours**.
 
@@ -53,5 +53,5 @@ We use:
 
 ## Contact
 
-For security concerns: security@pixelspace.com
+For security concerns: Use GitHub's Security Advisory feature or contact @Floristeady
 
