@@ -1,0 +1,47 @@
+# ⚠️ MANUAL DEPLOY ONLY - Auto-deploy is disabled for production
+#
+# This file is provided as a reference for self-hosting analytics backend.
+# 
+# Pixelspace's production deployment:
+# - Auto-deploy: DISABLED (manual deploy from Render Dashboard)
+# - Deploy frequency: Only when updating analytics code (~1-2 times/month)
+# - Configuration: Environment variables set in Render Dashboard
+#
+# To deploy your own analytics backend:
+# 1. Create account on Render.com
+# 2. Create PostgreSQL database
+# 3. Create Web Service pointing to analytics/ directory
+# 4. Set environment variables (see env.example)
+# 5. Enable auto-deploy for YOUR repo (or deploy manually)
+#
+# See analytics/README.md for complete instructions
+
+services:
+  - type: web
+    name: stories-analytics
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+    rootDir: ./analytics
+    plan: free
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stories-analytics-db
+          property: connectionString
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+
+databases:
+  - name: stories-analytics-db
+    databaseName: stories_analytics
+    plan: free
+

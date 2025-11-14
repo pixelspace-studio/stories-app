@@ -1,0 +1,64 @@
+{
+  "name": "stories-app",
+  "productName": "Stories",
+  "version": "0.9.8",
+  "description": "Stories - Voice to text transcription",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "./dev.sh",
+    "dev-simple": "npx electron electron/main.js --dev",
+    "backend": "cd backend && python3 app.py",
+    "build": "electron-forge package",
+    "make": "npm run make:community",
+    "make:community": "BUILD_TYPE=community electron-forge make && node scripts/post-make.js",
+    "make:internal": "BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && node scripts/post-make.js",
+    "notarize": "./scripts/notarize.sh",
+    "notarize:check": "./scripts/check-notarization.sh",
+    "notarize:status": "xcrun notarytool history --keychain-profile \"pixelspace-notarize\"",
+    "release": "npm run make && npm run notarize",
+    "setup": "./setup.sh",
+    "version:patch": "node scripts/version.js patch",
+    "version:minor": "node scripts/version.js minor",
+    "version:major": "node scripts/version.js major",
+    "version:set": "node scripts/version.js set"
+  },
+  "keywords": [
+    "stories",
+    "electron",
+    "voice",
+    "transcription",
+    "whisper",
+    "openai",
+    "voice-to-text"
+  ],
+  "author": "Pixelspace",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Floristeady/stories-app.git"
+  },
+  "publish": {
+    "provider": "github",
+    "owner": "pixelspace-studio",
+    "repo": "stories-releases"
+  },
+  "config": {
+    "forge": "./forge.config.js"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.4.0",
+    "@electron-forge/maker-deb": "^7.4.0",
+    "@electron-forge/maker-dmg": "^7.4.0",
+    "@electron-forge/maker-rpm": "^7.4.0",
+    "@electron-forge/maker-squirrel": "^7.4.0",
+    "@electron-forge/maker-zip": "^7.4.0",
+    "electron": "^33.2.1"
+  },
+  "dependencies": {
+    "@jitsi/robotjs": "^0.6.18",
+    "axios": "^1.5.0",
+    "electron-updater": "^6.6.2",
+    "sqlite3": "^5.1.7"
+  }
+}

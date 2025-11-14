@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
+    <title>Stories</title>
+    <link rel="stylesheet" href="../frontend/css/theme.css">
+    <link rel="stylesheet" href="../frontend/css/layout.css">
+    <link rel="stylesheet" href="../frontend/css/components.css">
+    <link rel="stylesheet" href="../frontend/css/utilities.css">
+    <!-- Phosphor Icons CSS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+</head>
+<body>
+    <div class="app-container" id="appContainer">
+        <!-- Top Header with Record Button + Title + Actions -->
+        <header class="app-header">
+            <div class="header-left">
+                <button id="recordButton" class="record-button-circular">
+                    <i class="ph ph-microphone"></i>
+                </button>
+                <div class="header-title-group">
+                    <h1 class="app-title">
+                        Turn your voice into <span class="title-bold">stories</span><span class="title-dot">.</span>
+                    </h1>
+                    <!-- Recording info appears here when recording -->
+                    <div id="recordingInfo" class="recording-info-inline hidden">
+                        <div class="timer-container">
+                            <div id="timer" class="timer-inline">00:00</div>
+                            <span id="warningIcon" class="warning-icon hidden">⚠️</span>
+                        </div>
+                        <div id="statusText" class="status-text-inline">starting</div>
+                        <div id="visualizer" class="visualizer-inline hidden">
+                            <div class="wave"></div>
+                            <div class="wave"></div>
+                            <div class="wave"></div>
+                        </div>
+                        <button class="cancel-button-inline hidden" id="cancelButton" title="Cancel recording">
+                            <i class="ph ph-x"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <button class="header-button skeleton-shimmer" id="shortcutsButton">
+                    <span>Shortcuts</span>
+                    <i class="ph ph-command"></i>
+                </button>
+                <button class="header-icon-button skeleton-shimmer" id="dictionaryButton" title="Dictionary">
+                    <i class="ph ph-notebook"></i>
+                </button>
+                <button class="header-icon-button skeleton-shimmer" id="settingsButton" title="Settings">
+                    <i class="ph ph-gear"></i>
+                </button>
+            </div>
+        </header>
+        
+        <main class="app-main">
+            <!-- Recent Transcriptions Section -->
+            <div class="transcriptions-section">
+                <h2 class="section-title hidden">Recent transcriptions</h2>
+                
+                <!-- Transcriptions Container with overflow gradient -->
+                <div class="transcriptions-wrapper">
+                    <div id="transcriptionsContainer" class="transcriptions-container">
+                        <!-- Skeleton loaders (removed when data loads) -->
+                        <div class="skeleton-transcription">
+                            <div class="skeleton-text skeleton-title"></div>
+                            <div class="skeleton-text skeleton-line"></div>
+                            <div class="skeleton-text skeleton-line-short"></div>
+                        </div>
+                        <div class="skeleton-transcription">
+                            <div class="skeleton-text skeleton-title"></div>
+                            <div class="skeleton-text skeleton-line"></div>
+                            <div class="skeleton-text skeleton-line-short"></div>
+                        </div>
+                        <div class="skeleton-transcription">
+                            <div class="skeleton-text skeleton-title"></div>
+                            <div class="skeleton-text skeleton-line"></div>
+                            <div class="skeleton-text skeleton-line-short"></div>
+                        </div>
+                    </div>
+                    <!-- Gradient overlay for overflow -->
+                    <div id="gradientOverlay" class="gradient-overlay hidden"></div>
+                </div>
+                
+                <!-- View All Button -->
+                <button id="loadMoreButton" class="load-more-button hidden">
+                    View all
+                </button>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Settings Panel -->
+    <div id="settingsOverlay" class="panel-overlay hidden">
+        <div class="side-panel" id="settingsPanel">
+            <div class="settings-header">
+                <h2 class="settings-title">Settings</h2>
+            </div>
+            <div class="settings-options">
+                <!-- API Key Setting -->
+                <div class="setting-item" id="apiKeySettingItem">
+                    <div class="setting-row">
+                        <span class="setting-label">API Key</span>
+                        <button class="btn-gray" id="addApiKeyButton">Add API Key</button>
+                    </div>
+                </div>
+                
+                <!-- API Key Setting (with key configured) -->
+                <div class="setting-item setting-item-vertical hidden" id="apiKeyConfiguredItem">
+                    <div class="setting-row">
+                        <span class="setting-label">API Key</span>
+                        <span class="api-key-display" id="apiKeyDisplay"></span>
+                    </div>
+                    <div class="setting-actions">
+                        <a href="#" class="setting-link" id="changeApiKeyButton">Change</a>
+                        <div class="action-separator"></div>
+                        <a href="#" class="setting-link-secondary" id="removeApiKeySettingsButton">Remove</a>
+                    </div>
+                </div>
+                
+                <!-- Auto-hide Widget Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Auto-hide widget</span>
+                            <span class="setting-tooltip" title="Show only when recording and transcribing">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoHideWidgetToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Auto-paste Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Auto-paste</span>
+                            <span class="setting-tooltip" title="Automatically paste transcription to active input">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoPasteToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Audio Cues Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Audio cues</span>
+                            <span class="setting-tooltip" title="Enable sound feedback for transcription actions">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="soundEffectsToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Save Audio Toggle -->
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-row">
+                        <span class="setting-label">Save audio files</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="saveAudioToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+            <!-- Audio Storage Management (Only visible when Save Audio is enabled AND has files) -->
+            <div id="audioStorageSection" class="audio-storage-section hidden">
+                <button class="icon-button-neutral hidden" id="openAudioFolderButton" title="Open Audio Folder">
+                    <i class="ph ph-folder"></i>
+                </button>
+                <span id="storageSeparator" class="storage-separator hidden">·</span>
+                <span id="storageStatsText" class="storage-stats-text hidden">Storage: -- MB (-- files)</span>
+                <button class="icon-button-delete hidden" id="cleanupAudioButton" title="Clear all audio files">
+                    <i class="ph ph-trash"></i>
+                </button>
+            </div>
+                </div>
+                
+                <!-- Telemetry Toggle (only shown in internal builds) -->
+                <div id="telemetrySettingContainer" class="setting-item setting-item-vertical" style="display: none;">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Share data</span>
+                            <span class="setting-tooltip" title="Anonymous usage stats to improve the app">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="telemetryToggle" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <a href="#" id="privacyPolicyLink" class="setting-link-secondary">Learn more</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Dictionary Panel -->
+    <div id="dictionaryOverlay" class="panel-overlay hidden">
+        <div class="side-panel" id="dictionaryPanel">
+            <div class="dictionary-header">
+                <h2 class="settings-title">Dictionary</h2>
+                <button class="add-word-button" id="addWordButton">
+                    <i class="ph ph-plus"></i>
+                    Add word
+                </button>
+            </div>
+            <div class="dictionary-content" id="dictionaryContent">
+                <!-- Words will be dynamically added here -->
+                <div class="dictionary-empty" id="dictionaryEmpty">
+                    <i class="ph ph-book-open"></i>
+                    <p>No words yet</p>
+                    <span>Add words to improve transcription accuracy</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- API Key Modal -->
+    <div id="apiKeyModal" class="modal-overlay hidden">
+        <div class="api-modal">
+            <button class="modal-close" id="closeApiModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title" id="apiKeyModalTitle">Add API Key</h3>
+            
+            <!-- Current API Key Display (only shown when changing) -->
+            <div id="currentApiKeySection" class="current-key-section hidden">
+                <span class="current-key-label">Current API Key:</span>
+                <span class="current-key-value" id="currentApiKeyValue">sk-...xxxx</span>
+            </div>
+            
+            <label class="input-label" id="apiKeyInputLabel">Enter your OpenAI API Key</label>
+            <input 
+                type="password" 
+                id="apiKeyInput" 
+                class="api-input" 
+                placeholder="sk-proj-..."
+            >
+            <button class="modal-submit" id="submitApiKey">
+                <span id="submitApiKeyText">Save API Key</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Remove API Key Confirmation Modal -->
+    <div id="removeApiKeyModal" class="modal-overlay hidden">
+        <div class="api-modal confirmation-modal">
+            <button class="modal-close" id="closeRemoveApiModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Remove API Key?</h3>
+            <p class="modal-description">This will delete your API key from Stories. You'll need to add it again to use transcription.</p>
+            <button class="modal-submit-danger" id="confirmRemoveApiKey">
+                Remove API Key
+            </button>
+        </div>
+    </div>
+    
+    <!-- Clear Audio Files Confirmation Modal -->
+    <div id="clearAudioModal" class="modal-overlay hidden">
+        <div class="api-modal confirmation-modal">
+            <button class="modal-close" id="closeClearAudioModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Clear All Audio Files?</h3>
+            <p class="modal-description">This will permanently delete all audio files stored locally. This action cannot be undone.</p>
+            <button class="modal-submit-danger" id="confirmClearAudio">
+                Clear All Audio Files
+            </button>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Word Modal -->
+    <div id="wordModal" class="modal-overlay hidden">
+        <div class="api-modal">
+            <button class="modal-close" id="closeWordModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title" id="wordModalTitle">Add word</h3>
+            <input 
+                type="text" 
+                id="wordInput" 
+                class="api-input" 
+                placeholder="Enter word (e.g., PixelSpace)"
+                maxlength="50"
+            >
+            <button class="modal-submit" id="submitWord">
+                <span id="submitWordText">Add word</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Shortcuts Panel -->
+    <div id="shortcutsOverlay" class="panel-overlay hidden">
+        <div class="side-panel" id="shortcutsPanel">
+            <h2 class="shortcuts-title">Shortcuts</h2>
+            <div class="shortcuts-list">
+                <!-- Shortcut Item 1 - Editable -->
+                <div class="shortcut-item shortcut-item-editable">
+                    <div class="shortcut-item-top">
+                        <span class="shortcut-description">Start / stop recording</span>
+                        <kbd class="shortcut-keys" id="recordShortcutDisplay">
+                            <span class="key">⌘</span>
+                            <span class="key">⇧</span>
+                            <span class="key">R</span>
+                        </kbd>
+                    </div>
+                    <a href="#" class="btn-link shortcuts-change-link" id="editRecordShortcut">Change</a>
+                </div>
+                <!-- Shortcut Item 2 - Fixed -->
+                <div class="shortcut-item">
+                    <span class="shortcut-description">Cancel recording</span>
+                    <kbd class="shortcut-keys">
+                        <span class="key">⌘</span>
+                        <span class="key">⌃</span>
+                        <span class="key">C</span>
+                    </kbd>
+                </div>
+                <!-- Shortcut Item 3 - Fixed -->
+                <div class="shortcut-item">
+                    <div class="shortcut-description-group">
+                        <span class="shortcut-description">Get transcription</span>
+                        <span class="setting-tooltip" title="Copies the latest transcription to clipboard">
+                            <i class="ph ph-info"></i>
+                        </span>
+                    </div>
+                    <kbd class="shortcut-keys">
+                        <span class="key">⌘</span>
+                        <span class="key">⌃</span>
+                        <span class="key">G</span>
+                    </kbd>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Edit Recording Shortcut Modal -->
+    <div id="shortcutsModal" class="modal-overlay hidden">
+        <div class="api-modal shortcuts-config-modal">
+            <button class="modal-close" id="closeShortcutsModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Change recording shortcut</h3>
+            
+            <div class="shortcut-input-wrapper">
+                <label class="shortcut-input-label">Start / stop recording</label>
+                <p class="shortcut-input-description">Press any key combination (max 3 keys). Recommended: Control+Option, Command+Shift, or Option+Command.</p>
+                <input 
+                    type="text" 
+                    id="recordShortcutInput" 
+                    class="shortcut-capture-input" 
+                    placeholder="Press any key combination..."
+                    readonly
+                >
+                <span class="shortcut-input-error" id="recordShortcutError">This shortcut is not allowed</span>
+            </div>
+            
+            <button class="modal-submit" id="saveRecordShortcut">
+                <span>Save Changes</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Alert Modal -->
+    <div id="alertModal" class="modal-overlay hidden">
+        <div class="alert-modal">
+            <div class="alert-icon" id="alertIcon">
+                <i class="ph ph-check-circle"></i>
+            </div>
+            <h3 class="alert-title" id="alertTitle">Success</h3>
+            <p class="alert-message" id="alertMessage">Operation completed successfully</p>
+            <button class="alert-button" id="alertButton">
+                <span>OK</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal-overlay hidden">
+        <div class="alert-modal">
+            <h3 class="alert-title" id="confirmTitle">Confirm Action</h3>
+            <p class="alert-message" id="confirmMessage">Are you sure?</p>
+            <div class="confirm-buttons">
+                <button class="alert-button secondary" id="confirmCancel">
+                    <span>Cancel</span>
+                </button>
+                <button class="alert-button danger" id="confirmOk">
+                    <span>Delete</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <!-- Update Available Notification -->
+    <div id="updateNotification" class="toast update-toast hidden">
+        <div class="toast-icon">
+            <i class="ph ph-download-simple"></i>
+        </div>
+        <div class="toast-content">
+            <div class="toast-message" id="updateNotificationMessage">
+                Version <span id="updateVersion"></span> available
+            </div>
+            <div class="update-progress hidden" id="updateProgress">
+                <div class="update-progress-bar">
+                    <div class="update-progress-fill" id="updateProgressFill"></div>
+                </div>
+                <div class="update-progress-text" id="updateProgressText">Downloading... 0%</div>
+            </div>
+        </div>
+        <button class="update-button" id="updateNowButton">Update</button>
+        <button class="update-button hidden" id="restartButton">Restart</button>
+    </div>
+    
+    <!-- Component Scripts (load before app.js) -->
+    <script src="../frontend/components/ModalManager.js"></script>
+    <script src="../frontend/components/StateManager.js"></script>
+    <script src="../frontend/components/TelemetryClient.js"></script>
+    <script src="../frontend/components/APIClient.js"></script>
+    <script src="../frontend/components/ShortcutManager.js"></script>
+    <script src="../frontend/components/DictionaryManager.js"></script>
+    <script src="../frontend/components/UIStateController.js"></script>
+    <script src="../frontend/components/SoundManager.js"></script>
+    <script src="../frontend/components/UpdateManager.js"></script>
+    
+    <!-- Main App Script -->
+    <script src="../frontend/app.js"></script>
+    
+    <!-- Note: Skeleton loaders are now controlled by app.js -->
+    <!-- They hide automatically when transcriptions finish loading -->
+</body>
+</html>

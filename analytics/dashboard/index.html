@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stories Analytics Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Stories Analytics Dashboard</h1>
+                <p class="subtitle">Real-time telemetry and usage analytics</p>
+            </div>
+            <button onclick="loadDashboard()">Refresh Data</button>
+        </header>
+
+        <div id="error-message" class="error" style="display: none;"></div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <i class="ph ph-users stat-icon"></i>
+                <div class="stat-label">Total Users</div>
+                <div class="stat-value" id="totalUsers">-</div>
+                <div class="stat-meta">All time</div>
+            </div>
+
+            <div class="stat-card">
+                <i class="ph ph-activity stat-icon"></i>
+                <div class="stat-label">Active Users (7d)</div>
+                <div class="stat-value" id="activeUsers7d">-</div>
+                <div class="stat-meta">Last 7 days</div>
+            </div>
+
+            <div class="stat-card">
+                <i class="ph ph-check-circle stat-icon"></i>
+                <div class="stat-label">Success Rate</div>
+                <div class="stat-value" id="successRate">-</div>
+                <div class="stat-meta" id="successRateMeta">No data yet</div>
+            </div>
+
+            <div class="stat-card">
+                <i class="ph ph-currency-dollar stat-icon"></i>
+                <div class="stat-label">Estimated Cost</div>
+                <div class="stat-value" id="totalCost">$0.00</div>
+                <div class="stat-meta">OpenAI API</div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h2 class="chart-title">Events Timeline</h2>
+                    <div class="timeline-period-container">
+                        <button id="timelinePeriodBtn" class="filter-btn">
+                            <span id="timelinePeriodLabel">Last 7 Days</span>
+                            <span class="filter-arrow">▼</span>
+                        </button>
+                        <div id="timelinePeriodDropdown" class="filter-dropdown" style="display: none;">
+                            <label class="filter-item">
+                                <input type="radio" name="timelinePeriod" value="7d" checked>
+                                <span>Last 7 Days</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="radio" name="timelinePeriod" value="30d">
+                                <span>Last 30 Days</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <canvas id="timelineChart"></canvas>
+            </div>
+
+            <div class="chart-card">
+                <h2 class="chart-title">Events by Type</h2>
+                <canvas id="eventsChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card full-width">
+            <div class="chart-header">
+                <h2 class="chart-title">Recent Transcriptions</h2>
+                <div class="filters-group">
+                    <div class="days-filter-container">
+                        <button id="daysFilterBtn" class="filter-btn">
+                            <span id="daysFilterLabel">Last 24 hours</span>
+                            <span class="filter-arrow">▼</span>
+                        </button>
+                        <div id="daysFilterDropdown" class="filter-dropdown" style="display: none;">
+                            <label class="filter-item">
+                                <input type="radio" name="days" value="1" checked>
+                                <span>Last 24 hours</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="radio" name="days" value="7">
+                                <span>Last 7 days</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="duration-filter-container">
+                        <button id="durationFilterBtn" class="filter-btn">
+                            <span id="durationFilterLabel">All Durations</span>
+                            <span class="filter-arrow">▼</span>
+                        </button>
+                        <div id="durationFilterDropdown" class="filter-dropdown" style="display: none;">
+                            <label class="filter-item">
+                                <input type="checkbox" id="selectAllDurations" checked>
+                                <span>Select All</span>
+                            </label>
+                            <div class="filter-divider"></div>
+                            <label class="filter-item">
+                                <input type="checkbox" class="duration-checkbox" data-duration="0-60" checked>
+                                <span>Less than 1 minute</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="checkbox" class="duration-checkbox" data-duration="60-300" checked>
+                                <span>1 to 5 minutes</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="checkbox" class="duration-checkbox" data-duration="300-600" checked>
+                                <span>5 to 10 minutes</span>
+                            </label>
+                            <label class="filter-item">
+                                <input type="checkbox" class="duration-checkbox" data-duration="600-1200" checked>
+                                <span>More than 10 minutes</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="user-filter-container">
+                        <button id="userFilterBtn" class="filter-btn">
+                            <span id="userFilterLabel">All Users</span>
+                            <span class="filter-arrow">▼</span>
+                        </button>
+                        <div id="userFilterDropdown" class="filter-dropdown" style="display: none;">
+                            <label class="filter-item">
+                                <input type="checkbox" id="selectAllUsers" checked>
+                                <span>Select All</span>
+                            </label>
+                            <div class="filter-divider"></div>
+                            <div id="userFilterList" class="filter-list">
+                                <!-- Users will be populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="pagination-info" id="recordingsPaginationInfo">
+                <span>Loading...</span>
+            </div>
+            <table id="recordingsTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>User ID</th>
+                        <th>Duration (s)</th>
+                        <th>Cost (USD)</th>
+                        <th>Platform</th>
+                    </tr>
+                </thead>
+                <tbody id="recordingsBody">
+                    <tr><td colspan="5" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+            <div class="pagination-controls" id="recordingsPagination">
+                <button id="recordingsPrevBtn" class="pagination-btn" disabled>← Previous</button>
+                <span id="recordingsPageInfo">Page 1 of 1</span>
+                <button id="recordingsNextBtn" class="pagination-btn" disabled>Next →</button>
+            </div>
+        </div>
+
+        <div class="chart-card full-width">
+            <div class="chart-header">
+                <h2 class="chart-title">Recent Errors</h2>
+                <div class="days-filter-container">
+                    <button id="errorsDaysFilterBtn" class="filter-btn">
+                        <span id="errorsDaysFilterLabel">Last 30 days</span>
+                        <span class="filter-arrow">▼</span>
+                    </button>
+                    <div id="errorsDaysFilterDropdown" class="filter-dropdown" style="display: none;">
+                        <label class="filter-item">
+                            <input type="radio" name="errorsDays" value="7">
+                            <span>Last 7 days</span>
+                        </label>
+                        <label class="filter-item">
+                            <input type="radio" name="errorsDays" value="30" checked>
+                            <span>Last 30 days</span>
+                        </label>
+                        <label class="filter-item">
+                            <input type="radio" name="errorsDays" value="90">
+                            <span>Last 90 days</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="pagination-info" id="errorsPaginationInfo">
+                <span>Loading...</span>
+            </div>
+            <table id="errorsTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>User ID</th>
+                        <th>Error Type</th>
+                        <th>Error Message</th>
+                        <th>Platform</th>
+                    </tr>
+                </thead>
+                <tbody id="errorsBody">
+                    <tr><td colspan="5" class="loading">Loading...</td></tr>
+                </tbody>
+            </table>
+            <div class="pagination-controls" id="errorsPagination">
+                <button id="errorsPrevBtn" class="pagination-btn" disabled>← Previous</button>
+                <span id="errorsPageInfo">Page 1 of 1</span>
+                <button id="errorsNextBtn" class="pagination-btn" disabled>Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/dashboard/dashboard.js"></script>
+</body>
+</html>

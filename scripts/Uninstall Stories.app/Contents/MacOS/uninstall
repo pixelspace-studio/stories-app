@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# This wrapper script opens Terminal and runs the uninstall script
+
+SCRIPT_DIR="$(dirname "$0")"
+UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
+
+# Make sure the uninstall script is executable
+chmod +x "$UNINSTALL_SCRIPT"
+
+# Run in Terminal with a clear title
+osascript -e "tell application \"Terminal\" to do script \"cd \\\"$SCRIPT_DIR\\\" && bash \\\"$UNINSTALL_SCRIPT\\\"; exit\" activate"

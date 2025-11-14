@@ -1,0 +1,8 @@
+# Signing Configuration Example
+# Copy this file to .signing.config and fill in your own values
+# The .signing.config file is gitignored and will not be committed
+
+export APPLE_SIGNING_IDENTITY="Developer ID Application: Your Company Name (YOURTEAMID)"
+export APPLE_KEYCHAIN_PROFILE="your-keychain-profile-name"
+export GITHUB_REPO="your-org/your-repo"
+

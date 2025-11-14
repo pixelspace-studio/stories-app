@@ -1,0 +1,36 @@
+/* ===================================
+   LAYOUT & BASE STRUCTURE
+   Base styles, reset, and main layout
+   =================================== */
+
+/* Reset */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--color-white);
+    color: var(--gray-90);
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
+/* Main Container */
+.app-container {
+    width: 100vw;
+    height: 100vh;
+    background: var(--color-white);
+    border-radius: 10px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25), 0 0 3px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-app-region: drag;
+}
+

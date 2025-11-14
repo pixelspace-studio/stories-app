@@ -1,0 +1,2036 @@
+/* ===================================
+   ALL COMPONENTS
+   Header, Buttons, Modals, Panels, etc.
+   =================================== */
+
+/* ===================================
+   4. Header & Navigation
+   =================================== */
+
+/* Header */
+.app-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: var(--space-6) var(--space-6) 0 var(--space-8);
+    margin-bottom: var(--space-6);
+    -webkit-app-region: drag;
+    gap: var(--space-4);
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    flex: 1;
+    padding-top: var(--space-8);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    -webkit-app-region: no-drag;
+}
+
+/* Shortcuts button - always visible */
+#shortcutsButton {
+    opacity: 1;
+}
+
+/* Circular Record Button */
+.record-button-circular {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-full);
+    background: var(--color-black);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+    position: relative;
+}
+
+.record-button-circular i {
+    font-size: var(--text-2xl);
+    color: var(--color-white);
+}
+
+/* Stop square (CSS) for recording state */
+.stop-square-main {
+    width: var(--space-3);
+    height: var(--space-3);
+    background-color: var(--color-stop-square);
+    border-radius: var(--radius-sm);
+}
+
+.record-button-circular:hover {
+    background: var(--gray-80);
+    transform: scale(1.05);
+}
+
+.record-button-circular:active {
+    transform: scale(0.95);
+}
+
+.record-button-circular.recording {
+    background: var(--color-pink);
+}
+
+/* Transcribing state - pink background with dark spinner */
+.record-button-circular.transcribing {
+    background: var(--color-pink);
+}
+
+/* Custom spinner for main window - CSS only, 20px */
+.spinner-custom-main {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 20px;
+    height: 20px;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 3px solid var(--gray-90);
+    border-top-color: transparent;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin-custom-main 1s linear infinite;
+    will-change: transform;
+}
+
+@keyframes spin-custom-main {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Transcribing state - only spinner rotates (legacy icon support) */
+.record-button-circular.transcribing .ph-circle-notch {
+    color: var(--gray-80);
+    animation: spin-simple 1s linear infinite;
+    will-change: transform;
+    transform: translateZ(0);
+    display: block;
+    width: 24px;
+    height: 24px;
+    line-height: 1;
+}
+
+@keyframes pulse-circular {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+}
+
+@keyframes spin-button {
+    from { transform: translate(-50%, -50%) rotate(0deg); }
+    to { transform: translate(-50%, -50%) rotate(360deg); }
+}
+
+@keyframes spin-simple {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Title Group */
+.header-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    flex: 1;
+}
+
+.app-title {
+    font-size: 22px; /* Custom size, not in system */
+    font-weight: 500;
+    color: var(--color-text-primary);
+    line-height: 1.2;
+    -webkit-app-region: no-drag;
+}
+
+.title-bold {
+    font-weight: 700;
+}
+
+.title-dot {
+    color: var(--color-pink);
+    font-weight: 700;
+}
+
+/* Recording Info Inline */
+.recording-info-inline {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.recording-info-inline.hidden {
+    display: none;
+}
+
+.status-text-inline {
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-70);
+}
+
+.status-text-inline.hidden {
+    display: none;
+}
+
+.timer-container {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.timer-inline {
+    font-size: var(--text-lg);
+    font-weight: 500;
+    color: var(--gray-90);
+    font-family: 'SF Mono', Monaco, monospace;
+}
+
+.warning-icon {
+    font-size: var(--text-base);
+    line-height: 1;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.warning-icon.hidden {
+    display: none;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.visualizer-inline {
+    display: flex;
+    gap: 2px; /* Too small for variables */
+    align-items: center;
+    height: var(--space-4);
+}
+
+.visualizer-inline.hidden {
+    display: none;
+}
+
+.visualizer-inline .wave {
+    width: 3px; /* Too small for variables */
+    height: var(--space-2);
+    background: var(--gray-40);
+    border-radius: 2px; /* Too small for variables */
+    animation: wave-inline 1.5s ease-in-out infinite;
+}
+
+.visualizer-inline .wave:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.visualizer-inline .wave:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes wave-inline {
+    0%, 100% { height: 8px; }
+    50% { height: 16px; }
+}
+
+.cancel-button-inline {
+    background: var(--gray-60);
+    border: none;
+    border-radius: var(--radius-full);
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: white;
+    font-size: var(--text-sm);
+    -webkit-app-region: no-drag;
+}
+
+.cancel-button-inline:hover {
+    background: var(--gray-70);
+}
+
+.cancel-button-inline.hidden {
+    display: none;
+}
+
+/* Header Buttons */
+.header-button {
+    background: var(--gray-20);
+    border: 0.5px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-xl);
+    padding: var(--space-1) var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: var(--text-base);
+    color: var(--gray-80);
+    font-weight: 400;
+    letter-spacing: 0.28px;
+}
+
+.header-button:hover {
+    background: var(--gray-15);
+}
+
+.header-button i {
+    font-size: var(--text-lg);
+}
+
+.header-icon-button {
+    background: transparent;
+    border: none;
+    width: var(--space-6);
+    height: var(--space-6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: var(--gray-80);
+}
+
+.header-icon-button:hover {
+    opacity: 0.7;
+}
+
+.header-icon-button i {
+    font-size: var(--text-2xl);
+}
+
+/* ===================================
+   5. Main Content Area
+   =================================== */
+
+/* Main Content */
+.app-main {
+    flex: 1;
+    padding: 0 var(--space-8) var(--space-4) var(--space-8);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
+}
+
+/* Transcriptions Section */
+.transcriptions-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px; /* Custom value between --space-3 and --space-4 */
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.section-title {
+    font-size: 13px; /* Custom, close to --text-sm */
+    font-weight: 400;
+    color: var(--gray-90);
+}
+
+/* Transcriptions Wrapper */
+.transcriptions-wrapper {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.transcriptions-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: hidden;
+    max-height: 100%;
+    padding-right: 4px;
+}
+
+.transcriptions-container.scrollable {
+    overflow-y: auto;
+}
+
+/* Scrollbar */
+.transcriptions-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.transcriptions-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.transcriptions-container::-webkit-scrollbar-thumb {
+    background: var(--gray-30);
+    border-radius: 3px;
+}
+
+.transcriptions-container::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-40);
+}
+
+/* Gradient Overlay */
+.gradient-overlay {
+    position: absolute;
+    bottom: -20px;
+    left: 0;
+    right: 0;
+    height: 100px;
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.8) 40%, rgba(255, 255, 255, 1) 80%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.gradient-overlay.hidden {
+    display: none;
+}
+
+/* Transcription Card */
+.transcription-card {
+    background: var(--color-white);
+    border: 1px solid var(--gray-30);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
+}
+
+.transcription-card:hover {
+    border-color: var(--gray-35);
+}
+
+/* Error Card Styles */
+.transcription-card.error-card {
+    background: var(--gray-10);
+    border-color: var(--gray-25);
+}
+
+.transcription-card.error-card:hover {
+    border-color: var(--gray-30);
+}
+
+.transcription-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.transcription-timestamp {
+    font-size: var(--text-sm);
+    color: var(--gray-70);
+    font-weight: 400;
+    line-height: 1.35;
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Custom */
+}
+
+.transcription-timestamp i {
+    font-size: var(--text-base);
+    color: var(--color-error);
+}
+
+.transcription-actions {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+}
+
+.action-icon-button {
+    background: transparent;
+    border: none;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    color: var(--gray-60);
+    padding: 0;
+}
+
+.action-icon-button:hover {
+    color: var(--gray-80);
+}
+
+.action-icon-button.delete-button:hover {
+    color: var(--color-error);
+}
+
+.action-icon-button i {
+    font-size: 20px;
+}
+
+.transcription-content {
+    font-size: var(--text-base);
+    line-height: 1.5;
+    color: var(--gray-90);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.transcription-content.error-text {
+    font-style: italic;
+    color: var(--gray-60);
+}
+
+/* Retrying state text */
+.transcription-content.retrying-text {
+    font-style: italic;
+    color: var(--gray-60);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+/* Retry button styles */
+.retry-button {
+    position: relative;
+}
+
+.retry-button:hover {
+    color: var(--gray-80);
+}
+
+.retry-button i[style*="spin"] {
+    animation: spin 1s linear infinite !important;
+}
+
+/* Spin animation for retry (reusing existing animation) */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Load More & Show Less Buttons */
+.load-more-button,
+.show-less-button {
+    background: var(--gray-20);
+    border: 0.5px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-xl);
+    padding: var(--space-1) var(--space-4);
+    font-size: var(--text-base);
+    color: var(--gray-70);
+    font-weight: 400;
+    letter-spacing: 0.28px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    margin: var(--space-4) auto 0 auto;
+    display: block;
+    width: fit-content;
+    -webkit-app-region: no-drag;
+}
+
+.load-more-button:hover,
+.show-less-button:hover {
+    background: var(--gray-15);
+}
+
+.load-more-button.hidden,
+.show-less-button.hidden {
+    display: none;
+}
+
+/* ===================================
+   6. Empty State
+   =================================== */
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 40px; /* Custom large padding */
+    text-align: center;
+    height: 100%;
+}
+
+.empty-state-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--space-5);
+}
+
+.empty-state-icon i {
+    font-size: 48px; /* Custom large icon */
+    color: var(--gray-40);
+}
+
+.empty-state-waves {
+    display: none;
+}
+
+.empty-state-title {
+    font-size: var(--text-xl);
+    font-weight: 400;
+    color: var(--gray-90);
+    margin-bottom: var(--space-2);
+    letter-spacing: -0.2px;
+}
+
+.empty-state-highlight {
+    font-weight: 600;
+}
+
+.empty-state-dot {
+    color: var(--color-pink);
+    font-weight: 600;
+}
+
+.empty-state-text {
+    font-size: var(--text-base);
+    color: var(--gray-60);
+    line-height: 1.5;
+    max-width: 280px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.empty-state-link {
+    color: var(--color-black);
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+}
+
+.empty-state-link:hover {
+    opacity: 0.7;
+}
+
+/* Hidden Elements */
+.hidden {
+    display: none !important;
+}
+
+/* ===================================
+   7. Transcription History
+   =================================== */
+/* Transcription history items are defined in Main Content Area (section 5) */
+
+/* ===================================
+   8. Panel Overlays (Reusable Base Styles)
+   =================================== */
+
+/* 
+ * Base styles for side panel overlays (Settings, Shortcuts, Dictionary)
+ * All specific overlays inherit these styles to maintain consistency
+ * 
+ * Structure:
+ * - .panel-overlay (or .settings-overlay, .shortcuts-overlay) - full screen container with dark background
+ *   - .settings-panel / .shortcuts-panel - actual panel content (slides in from right)
+ * 
+ * States:
+ * - .hidden - display: none
+ * - .show - visible with opacity transition and pointer-events enabled
+ */
+
+/* Base overlay for all side panels */
+.panel-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 2000;
+    display: flex;
+    background: var(--overlay-dark);
+    border-radius: var(--text-xs) 0 0 var(--text-xs); /* 10px fallback to text-xs */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-smooth);
+}
+
+.panel-overlay.hidden {
+    display: none;
+}
+
+.panel-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+
+/* ===================================
+   9. Side Panels (Settings, Dictionary, Shortcuts)
+   =================================== */
+
+/* Base side panel - shared by all side panels */
+.side-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 320px;
+    height: 100%;
+    background: var(--warm-gray-20);
+    box-shadow: var(--shadow-md);
+    border-radius: 0 var(--text-xs) var(--text-xs) 0; /* 10px fallback */
+    cursor: default;
+    padding: var(--space-8) var(--space-4) var(--space-8) var(--space-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    transform: translateX(100%);
+    transition: transform var(--transition-smooth);
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
+}
+
+.panel-overlay.show .side-panel {
+    transform: translateX(0);
+}
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.settings-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-lg);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin: 0;
+    text-align: left;
+}
+
+.settings-options {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: var(--space-2);
+}
+
+/* Scrollbar styling for settings */
+.settings-options::-webkit-scrollbar {
+    width: 6px;
+}
+
+.settings-options::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.settings-options::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.settings-options:hover::-webkit-scrollbar-thumb {
+    background: var(--gray-30);
+}
+
+.settings-options::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-40);
+}
+
+/* Setting Item Component
+ * 
+ * Usage patterns:
+ * 
+ * 1. Simple setting with toggle/button:
+ *    <div class="setting-item">
+ *        <div class="setting-row">
+ *            <span class="setting-label">Label</span>
+ *            <label class="toggle-switch">...</label>
+ *        </div>
+ *    </div>
+ * 
+ * 2. Setting with helper text:
+ *    <div class="setting-item setting-item-vertical">
+ *        <div class="setting-row">
+ *            <span class="setting-label">Label</span>
+ *            <label class="toggle-switch">...</label>
+ *        </div>
+ *        <span class="setting-helper-text">Small descriptive text</span>
+ *    </div>
+ * 
+ * 3. Setting with tooltip icon (recommended for cleaner UI):
+ *    <div class="setting-item">
+ *        <div class="setting-row">
+ *            <div class="setting-label-group">
+ *                <span class="setting-label">Label</span>
+ *                <span class="setting-tooltip" title="Tooltip text">
+ *                    <i class="ph ph-info"></i>
+ *                </span>
+ *            </div>
+ *            <label class="toggle-switch">...</label>
+ *        </div>
+ *    </div>
+ */
+
+.setting-item {
+    background: var(--color-white);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4) var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    -webkit-app-region: no-drag;
+}
+
+.setting-item-vertical {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.setting-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 600;
+    color: var(--gray-80);
+}
+
+.setting-label-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px; /* Custom */
+}
+
+.setting-description {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    color: var(--gray-60);
+    margin-top: var(--space-2);
+    line-height: 1.4;
+}
+
+.setting-tooltip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: help;
+    color: var(--gray-60);
+    font-size: var(--text-base);
+    line-height: 1;
+    transition: color var(--transition-fast);
+    position: relative;
+}
+
+.setting-tooltip:hover {
+    color: var(--gray-80);
+}
+
+.setting-tooltip i {
+    font-size: var(--text-base);
+}
+
+/* Custom tooltip on hover */
+.setting-tooltip::after {
+    content: attr(title);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 4px);
+    transform: translateX(-50%);
+    background: var(--gray-90);
+    color: var(--color-white);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.3;
+    white-space: normal;
+    width: 180px;
+    text-align: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1000;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Tooltip arrow */
+.setting-tooltip::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 2px);
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--gray-90);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 1000;
+}
+
+.setting-tooltip:hover::after,
+.setting-tooltip:hover::before {
+    opacity: 1;
+}
+
+.setting-sublabel {
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--gray-60);
+    letter-spacing: 0.5px;
+}
+
+.api-key-display {
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--gray-70);
+    letter-spacing: 0.5px;
+}
+
+/* ===================================
+   16. Button Components (Reusable)
+   =================================== 
+   
+   Use these component classes for consistent button styling:
+   
+   .btn-gray  - Rounded button with gray background (e.g., "Add API Key")
+   .btn-link  - Bold underlined text link (e.g., "Change API Key", "Clean old files")
+   
+   Examples:
+   <button class="btn-gray">Add API Key</button>
+   <a href="#" class="btn-link">Change API Key</a>
+   
+   =================================== */
+
+/* Gray Button - Rounded with background */
+.btn-gray {
+    background: var(--gray-20);
+    border: 0.5px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-xl);
+    padding: var(--space-1) var(--space-4);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-70);
+    letter-spacing: 0.28px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    z-index: 10;
+    pointer-events: auto;
+    -webkit-app-region: no-drag;
+}
+
+.btn-gray:hover {
+    background: var(--gray-15);
+}
+
+.btn-gray:active {
+    transform: scale(0.98);
+}
+
+/* Link Button - Bold and underlined (no background) */
+.btn-link {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-black);
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+    background: none;
+    border: none;
+    padding: 0;
+    padding-top: var(--space-2);
+    align-self: flex-end;
+    -webkit-app-region: no-drag;
+}
+
+.btn-link:hover {
+    opacity: 0.7;
+}
+
+/* Legacy aliases for backwards compatibility */
+.setting-button {
+    /* Use .btn-gray instead */
+    background: var(--gray-20);
+    border: 0.5px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-xl);
+    padding: var(--space-1) var(--space-4);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-70);
+    letter-spacing: 0.28px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    position: relative;
+    z-index: 10;
+    pointer-events: auto;
+    -webkit-app-region: no-drag;
+}
+
+.setting-button:hover {
+    background: var(--gray-15);
+}
+
+.setting-button:active {
+    transform: scale(0.98);
+}
+
+.setting-link,
+.cleanup-link {
+    /* Use .btn-link instead */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-black);
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+    padding-top: var(--space-2);
+    align-self: flex-end;
+    -webkit-app-region: no-drag;
+}
+
+.setting-link:hover,
+.cleanup-link:hover {
+    opacity: 0.7;
+}
+
+/* Setting Actions (for Change | Remove layout) */
+.setting-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+    justify-content: flex-end;
+}
+
+.setting-actions .setting-link {
+    padding-top: 0;
+    align-self: auto;
+}
+
+.action-separator {
+    width: 1px;
+    height: 14px;
+    background: var(--gray-30);
+}
+
+.setting-link-secondary {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-black);
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+    -webkit-app-region: no-drag;
+}
+
+.setting-link-secondary:hover {
+    opacity: 0.7;
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 24px;
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: transparent;
+    border: 2px solid var(--gray-30);
+    border-radius: 12px;
+    transition: all 0.3s ease;
+}
+
+.toggle-slider:before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--gray-30);
+    border-radius: 50%;
+    transition: all 0.3s ease;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--color-black);
+    border-color: var(--color-black);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    background-color: var(--color-white);
+    transform: translateX(16px);
+}
+
+/* ===================================
+   11. Audio Storage Section
+   =================================== */
+
+.audio-storage-section {
+    width: 100%;
+    margin-top: var(--space-4);
+    padding-top: var(--space-2);
+    border-top: 0.5px solid rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0;
+    transition: all var(--transition-normal);
+}
+
+.audio-storage-section.hidden {
+    display: none;
+}
+
+/* Setting Helper Text - Small descriptive text for settings */
+.setting-helper-text {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--gray-70);
+    letter-spacing: 0.24px;
+    margin-top: var(--space-1);
+}
+
+/* Icon Button Base Styles - Neutral (gray-70 → gray-90 on hover) */
+.icon-button-neutral {
+    background: transparent;
+    border: none;
+    padding: var(--space-1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    -webkit-app-region: no-drag;
+    height: var(--space-6);
+}
+
+.icon-button-neutral i {
+    font-size: var(--text-lg);
+    color: var(--gray-70);
+    transition: color var(--transition-fast);
+}
+
+.icon-button-neutral:hover {
+    background: var(--gray-10);
+}
+
+.icon-button-neutral:hover i {
+    color: var(--gray-90);
+}
+
+/* Icon Button - Delete (red on hover) */
+.icon-button-delete {
+    background: transparent;
+    border: none;
+    padding: var(--space-1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition-fast);
+    -webkit-app-region: no-drag;
+    height: var(--space-6);
+}
+
+.icon-button-delete i {
+    font-size: var(--text-lg);
+    color: var(--gray-70);
+    transition: color var(--transition-fast);
+}
+
+.icon-button-delete:hover {
+    background: var(--gray-10);
+}
+
+.icon-button-delete:hover i {
+    color: var(--color-error);
+}
+
+.storage-separator {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    color: var(--gray-40);
+    padding: 0 4px;
+    margin: 0;
+    line-height: 1;
+}
+
+.storage-stats-text {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--gray-70);
+    letter-spacing: 0.24px;
+    text-align: right;
+}
+
+/* ===================================
+   10. Dictionary Specific Styles
+   =================================== */
+
+.dictionary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-4);
+}
+
+.add-word-button {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Custom */
+    background: var(--color-black);
+    color: var(--color-white);
+    border: none;
+    border-radius: var(--radius-xl);
+    padding: 6px var(--space-4); /* 6px custom */
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    letter-spacing: 0.28px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    -webkit-app-region: no-drag;
+}
+
+.add-word-button i {
+    font-size: var(--text-lg);
+}
+
+.add-word-button:hover {
+    background: var(--gray-90);
+}
+
+.add-word-button:active {
+    transform: scale(0.98);
+}
+
+.dictionary-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+.dictionary-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-12) var(--space-6);
+    text-align: center;
+    color: var(--gray-50);
+}
+
+.dictionary-empty i {
+    font-size: 48px; /* Custom large */
+    margin-bottom: var(--space-3);
+    opacity: 0.3;
+}
+
+.dictionary-empty p {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-lg);
+    font-weight: 500;
+    margin: 0 0 var(--space-1) 0;
+    color: var(--gray-70);
+}
+
+.dictionary-empty span {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--gray-50);
+}
+
+.dictionary-empty.hidden {
+    display: none;
+}
+
+.dictionary-word-item {
+    background: var(--color-white);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+    transition: all var(--transition-fast);
+}
+
+.dictionary-word-item:hover {
+    background: var(--gray-15);
+}
+
+.dictionary-word-text {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-80);
+    letter-spacing: 0.28px;
+    flex: 1;
+}
+
+.dictionary-word-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.dictionary-action-button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: var(--space-1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray-60);
+    transition: all var(--transition-fast);
+    border-radius: var(--radius-sm);
+}
+
+.dictionary-action-button:hover {
+    background: var(--gray-20);
+    color: var(--gray-80);
+}
+
+.dictionary-action-button.delete:hover {
+    color: var(--color-error);
+}
+
+.dictionary-action-button i {
+    font-size: var(--text-xl);
+}
+
+/* ===================================
+   12. API Key Modal
+   =================================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3000;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    pointer-events: none;
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+/* API Modal */
+.api-modal {
+    background: var(--color-white);
+    border-radius: var(--radius-md);
+    padding: var(--space-8);
+    width: 400px;
+    max-width: 90%;
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    cursor: default;
+    transform: scale(0.9);
+    transition: transform var(--transition-fast);
+    pointer-events: auto;
+}
+
+.modal-overlay.show .api-modal {
+    transform: scale(1);
+}
+
+/* Modal Close Button */
+.modal-close {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    width: var(--space-8);
+    height: var(--space-8);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--gray-60);
+    font-size: 20px;
+    transition: all var(--transition-fast);
+}
+
+.modal-close:hover {
+    background: var(--gray-15);
+    color: var(--color-text-primary);
+}
+
+/* Modal Title */
+.modal-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 0;
+}
+
+/* Current API Key Section */
+.current-key-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px; /* Custom */
+    padding: var(--space-3) var(--space-4);
+    background: var(--gray-10);
+    border-radius: 6px; /* Custom */
+    border: 1px solid var(--gray-15);
+}
+
+.current-key-section.hidden {
+    display: none;
+}
+
+.current-key-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--gray-60);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.current-key-value {
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    font-size: 13px; /* Custom */
+    font-weight: 400;
+    color: var(--gray-80);
+    letter-spacing: 0.5px;
+}
+
+/* Input Label */
+.input-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px; /* Custom */
+    font-weight: 500;
+    color: var(--gray-70);
+    margin: 0;
+}
+
+/* API Input */
+.api-input {
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--gray-15);
+    border-radius: var(--radius-md);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    color: var(--gray-80);
+    transition: all var(--transition-fast);
+}
+
+.api-input:focus {
+    outline: none;
+    border-color: var(--color-black);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.api-input::placeholder {
+    color: var(--gray-45);
+}
+
+/* Modal Submit Button */
+.modal-submit {
+    width: 100%;
+    padding: var(--space-3) var(--space-6);
+    background: var(--color-black);
+    color: var(--color-white);
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.modal-submit:hover {
+    background: var(--gray-80);
+}
+
+.modal-submit:disabled {
+    background: var(--gray-30);
+    cursor: not-allowed;
+}
+
+/* Confirmation Modal */
+.confirmation-modal {
+    text-align: center;
+}
+
+.modal-description {
+    font-size: 14px;
+    color: var(--gray-60);
+    line-height: 1.5;
+    margin: 16px 0 24px 0;
+    text-align: center;
+}
+
+.modal-submit-danger {
+    width: 100%;
+    padding: 12px 24px;
+    background: var(--color-error);
+    color: var(--color-white);
+    border: none;
+    border-radius: 8px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.modal-submit-danger:hover {
+    background: #dc2626;
+}
+
+/* ===================================
+   13. Alert Modal
+   =================================== */
+
+/* Alert Modal */
+.alert-modal {
+    background: var(--color-white);
+    border-radius: var(--radius-lg);
+    padding: var(--space-8);
+    width: 360px;
+    max-width: 90%;
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    display: flex;
+    cursor: default;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    text-align: center;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: all var(--transition-fast) cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: auto;
+}
+
+.modal-overlay.show .alert-modal {
+    transform: scale(1);
+    opacity: 1;
+}
+
+.alert-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-full);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--space-1);
+}
+
+.alert-icon i {
+    font-size: var(--space-8);
+}
+
+/* Alert Icon Types */
+.alert-icon.success {
+    background: #DCFCE7;
+    color: #16A34A;
+}
+
+.alert-icon.error {
+    background: #FEE2E2;
+    color: var(--color-error);
+}
+
+.alert-icon.warning {
+    background: #FEF3C7;
+    color: #D97706;
+}
+
+.alert-icon.info {
+    background: #DBEAFE;
+    color: #2563EB;
+}
+
+.alert-title {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    color: var(--color-black);
+    margin: 0;
+    letter-spacing: -0.2px;
+}
+
+.alert-message {
+    font-size: var(--text-base);
+    color: var(--gray-60);
+    line-height: 1.5;
+    margin: 0;
+    max-width: 300px;
+}
+
+.alert-button {
+    width: 100%;
+    padding: var(--space-3) var(--space-6);
+    background: var(--color-black);
+    color: var(--color-white);
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    margin-top: var(--space-2);
+}
+
+.alert-button:hover {
+    background: var(--gray-80);
+}
+
+/* Confirm Modal Buttons */
+.confirm-buttons {
+    display: flex;
+    gap: var(--space-3);
+    width: 100%;
+    margin-top: var(--space-2);
+}
+
+.alert-button.secondary {
+    background: var(--gray-20);
+    color: var(--color-text-primary);
+}
+
+.alert-button.secondary:hover {
+    background: var(--gray-30);
+}
+
+.alert-button.danger {
+    background: #ef4444;
+    color: white;
+}
+
+.alert-button.danger:hover {
+    background: #dc2626;
+}
+
+/* ===================================
+   14. Shortcuts Specific Styles
+   =================================== */
+
+.shortcuts-title {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-lg);
+    font-weight: 500;
+    color: var(--color-text-primary);
+    margin: 0;
+    text-align: left;
+}
+
+.shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: var(--space-2);
+}
+
+/* Scrollbar styling for shortcuts */
+.shortcuts-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.shortcuts-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.shortcuts-list::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+
+.shortcuts-list:hover::-webkit-scrollbar-thumb {
+    background: var(--gray-30);
+}
+
+.shortcuts-list::-webkit-scrollbar-thumb:hover {
+    background: var(--gray-40);
+}
+
+/* Shortcut Item */
+.shortcut-item {
+    background: var(--color-white);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4) var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    -webkit-app-region: no-drag;
+}
+
+/* Shortcut description with tooltip (same pattern as setting-label-group) */
+.shortcut-description-group {
+    display: flex;
+    align-items: center;
+    gap: 6px; /* Same as setting-label-group */
+}
+
+.shortcut-item-editable {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+}
+
+.shortcut-item-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.shortcut-description {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-80);
+}
+
+/* Shortcut Keys */
+.shortcut-keys {
+    display: flex;
+    gap: var(--space-1);
+    align-items: center;
+}
+
+.shortcut-keys .key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--space-6);
+    height: var(--space-6);
+    padding: 0 6px; /* Custom */
+    background: var(--gray-20);
+    border: 1px solid var(--gray-25);
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px; /* Custom */
+    font-weight: 500;
+    color: var(--gray-80);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Change shortcut link */
+.shortcuts-change-link {
+    align-self: flex-end;
+    padding-top: var(--space-2);
+}
+
+/* ===================================
+   15. Shortcuts Configuration Modal
+   =================================== */
+
+.shortcuts-config-modal {
+    width: 420px;
+    max-width: 90%;
+}
+
+.shortcut-input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.shortcut-input-label {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px; /* Custom */
+    font-weight: 500;
+    color: var(--gray-70);
+    margin: 0;
+}
+
+.shortcut-input-description {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-sm);
+    color: var(--gray-60);
+    margin: var(--space-1) 0 0 0;
+}
+
+.shortcut-capture-input {
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--gray-15);
+    border-radius: var(--radius-md);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    color: var(--gray-80);
+    transition: all var(--transition-fast);
+    background: var(--color-white);
+    cursor: pointer;
+    text-align: center;
+}
+
+.shortcut-capture-input:focus {
+    outline: none;
+    border-color: var(--color-black);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.shortcut-capture-input.capturing {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    background: #EFF6FF;
+}
+
+.shortcut-capture-input.error {
+    border-color: var(--color-error);
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1);
+    background: #FEF2F2;
+}
+
+.shortcut-input-error {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 12px;
+    color: var(--color-error);
+    margin-top: 4px;
+    display: none;
+}
+
+.shortcut-input-error.show {
+    display: block;
+}
+
+/* ===================================
+   17. Toast Notifications
+   =================================== */
+
+.toast-container {
+    position: fixed;
+    bottom: var(--space-6);
+    right: var(--space-6);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    pointer-events: none;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 280px;
+    max-width: 400px;
+    padding: var(--space-3) var(--space-4);
+    background: var(--gray-20);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md), 0 0 1px rgba(0, 0, 0, 0.1);
+    pointer-events: auto;
+    animation: toastSlideIn var(--transition-normal) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toast.hiding {
+    animation: toastSlideOut var(--transition-fast) cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
+.toast-icon {
+    flex-shrink: 0;
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toast.success .toast-icon {
+    color: var(--color-pink);
+}
+
+.toast.error .toast-icon {
+    color: var(--color-error);
+}
+
+.toast-message {
+    flex: 1;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 13px; /* Custom */
+    font-weight: 400;
+    color: var(--gray-90);
+    line-height: 1.4;
+}
+
+@keyframes toastSlideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes toastSlideOut {
+    from {
+        transform: translateX(0) scale(1);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%) scale(0.95);
+        opacity: 0;
+    }
+}
+
+/* ===================================
+   Update Notification (Toast Style)
+   =================================== */
+
+.update-toast {
+    position: fixed;
+    bottom: var(--space-6); /* Same level as regular toasts */
+    right: var(--space-6);
+    z-index: 10001;
+    pointer-events: auto;
+    min-width: 320px;
+    max-width: 400px;
+}
+
+.update-toast.hidden {
+    display: none;
+}
+
+.update-toast .toast-icon {
+    color: var(--color-pink);
+}
+
+.toast-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.update-progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+}
+
+.update-progress-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--gray-30);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+}
+
+.update-progress-fill {
+    height: 100%;
+    background: var(--color-pink);
+    border-radius: var(--radius-full);
+    transition: width 0.3s ease-out;
+}
+
+.update-progress-text {
+    font-size: var(--text-xs);
+    color: var(--gray-60);
+}
+
+.update-button {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    background: var(--color-black);
+    color: var(--color-white);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.update-button:hover {
+    opacity: 0.85;
+    transform: translateY(-1px);
+}
+
+.update-button:active {
+    transform: translateY(0);
+}
