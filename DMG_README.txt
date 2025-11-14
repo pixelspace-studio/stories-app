@@ -91,8 +91,9 @@ LOCAL NETWORK (Required)
 ✓ API keys are encrypted and stored locally only
 ✓ Audio is processed via OpenAI Whisper API (not stored on servers)
 ✓ Transcriptions are saved locally in SQLite
-✓ No analytics, tracking, or data collection
+✓ NO telemetry - GitHub releases have zero tracking
 ✓ Local network permission used ONLY for internal communication
+✓ Open source - all code is auditable
 
 
 📚 DOCUMENTATION
@@ -104,8 +105,8 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.7
-License: MIT
+Version: 0.9.8
+License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────
 
