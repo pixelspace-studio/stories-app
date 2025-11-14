@@ -49,13 +49,20 @@ if [ -z "$APPLE_KEYCHAIN_PROFILE" ]; then
     exit 1
 fi
 
-# Check if DMG exists
-DMG_PATH="out/make/Stories.dmg"
-if [ ! -f "$DMG_PATH" ]; then
-    echo -e "${RED}Error: DMG not found at $DMG_PATH${NC}"
-    echo "Run 'npm run make' first!"
-    exit 1
+# Check if DMG exists - auto-detect versioned DMG
+DMG_PATH=$(find out/make -name "Stories-v*.dmg" -type f | grep -E "Stories-v[0-9]+\.[0-9]+\.[0-9]+-community\.dmg$" | head -1)
+
+if [ -z "$DMG_PATH" ]; then
+    # Fallback to legacy name
+    DMG_PATH="out/make/Stories.dmg"
+    if [ ! -f "$DMG_PATH" ]; then
+        echo -e "${RED}Error: DMG not found${NC}"
+        echo "Run 'npm run make:community' first!"
+        exit 1
+    fi
 fi
+
+echo "Found DMG: $DMG_PATH"
 
 # Step 1: Sign the DMG
 echo -e "\n${BLUE}Step 1: Signing DMG...${NC}"
