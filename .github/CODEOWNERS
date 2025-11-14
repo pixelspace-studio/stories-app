@@ -1,0 +1,21 @@
+# Code Owners for Stories App
+# These users will be automatically requested for review when PRs are opened
+
+# Global owners - apply to all files
+* @Floristeady
+
+# Critical configuration files
+/.github/ @Floristeady
+/package.json @Floristeady
+/forge.config.js @Floristeady
+/.gitignore @Floristeady
+
+# Security-sensitive scripts
+/scripts/notarize.sh @Floristeady
+/scripts/publish-release.sh @Floristeady
+/scripts/sign-all-binaries.sh @Floristeady
+
+# Backend code
+/backend/ @Floristeady
+/analytics/ @Floristeady
+
