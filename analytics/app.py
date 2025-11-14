@@ -574,7 +574,7 @@ def root():
             'crashes': 'GET /crashes (requires auth)',
             'cleanup': 'POST /cleanup (requires auth)'
         },
-        'documentation': 'https://github.com/Floristeady/stories-app/blob/main/docs/TELEMETRY_SPEC.md'
+        'documentation': 'https://github.com/pixelspace-studio/stories-app/blob/main/docs/TELEMETRY_SPEC.md'
     }), 200
 
 # =============================================================================

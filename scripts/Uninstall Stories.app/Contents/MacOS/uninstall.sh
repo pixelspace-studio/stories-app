@@ -130,7 +130,7 @@ else
 fi
 
 echo ""
-echo "💡 To reinstall: Download from https://github.com/Floristeady/stories-app"
+echo "💡 To reinstall: Download from https://github.com/pixelspace-studio/stories-app"
 echo ""
 echo "Press any key to close this window..."
 read -n 1

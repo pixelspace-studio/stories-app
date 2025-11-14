@@ -92,7 +92,7 @@ module.exports = {
           section: 'utils',
           priority: 'optional',
           maintainer: 'Pixelspace',
-          homepage: 'https://github.com/Floristeady/stories-app'
+          homepage: 'https://github.com/pixelspace-studio/stories-app'
         }
       }
     },
@@ -104,7 +104,7 @@ module.exports = {
           productName: 'Stories',
           icon: './assets/icons/1024.png',
           categories: ['Utility', 'AudioVideo'],
-          homepage: 'https://github.com/Floristeady/stories-app'
+          homepage: 'https://github.com/pixelspace-studio/stories-app'
         }
       }
     }

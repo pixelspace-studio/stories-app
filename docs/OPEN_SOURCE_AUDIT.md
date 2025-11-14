@@ -174,8 +174,8 @@ ENABLE_TELEMETRY=true npm run build:internal
 #### ⚠️ Referencias a Repositorios Privados
 
 **Encontradas en:**
-- `package.json` - `"url": "https://github.com/Floristeady/stories-app.git"`
-- `forge.config.js` - `homepage: 'https://github.com/Floristeady/stories-app'`
+- `package.json` - `"url": "https://github.com/pixelspace-studio/stories-app.git"` ✅ UPDATED
+- `forge.config.js` - `homepage: 'https://github.com/pixelspace-studio/stories-app'` ✅ UPDATED
 - `analytics/app.py` - Link a documentación en repo privado
 - `scripts/Uninstall Stories.command` - Link a repo privado
 - `scripts/Uninstall Stories.app/Contents/MacOS/uninstall.sh` - Link a repo privado
@@ -279,7 +279,7 @@ ENABLE_TELEMETRY=true npm run build:internal
 ### Repositorios
 
 **Cambiar todas las referencias de:**
-- `Floristeady/stories-app` → `pixelspace-studio/stories-app`
+- `Floristeady/stories-app` → `pixelspace-studio/stories-app` ✅ UPDATED
 - `yourusername/stories-app` → `pixelspace-studio/stories-app`
 
 **Archivos a actualizar:**
@@ -297,7 +297,7 @@ ENABLE_TELEMETRY=true npm run build:internal
 ### Releases
 
 **Estado actual:**
-- ✅ Releases están en `pixelspace-studio/stories-releases` (repo separado)
+- ✅ Releases consolidados en `pixelspace-studio/stories-app` (mismo repo)
 - ⚠️ `package.json` tiene `publish.repo` apuntando a `stories-releases`
 
 **Decisión requerida:**
@@ -317,7 +317,7 @@ Si se mueven releases al repo principal:
 
 ### Estado Actual
 
-- Releases están en `pixelspace-studio/stories-releases` (repo público separado)
+- Releases consolidados en `pixelspace-studio/stories-app` (mismo repo público)
 - El usuario quiere moverlos al repo principal
 
 ### Acción Requerida

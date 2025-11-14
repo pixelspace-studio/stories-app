@@ -88,7 +88,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "Thank you for using Stories! 👋"
 echo ""
-echo "💡 To reinstall: Download from https://github.com/Floristeady/stories-app"
+echo "💡 To reinstall: Download from https://github.com/pixelspace-studio/stories-app"
 echo ""
 
 exit 0

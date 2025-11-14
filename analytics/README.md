@@ -588,7 +588,7 @@ gunicorn app:app --workers 4 --timeout 60
 
 - **Technical Docs:** `/docs/TELEMETRY_SPEC.md`
 - **Privacy Policy:** `/docs/PRIVACY_TELEMETRY.md`
-- **GitHub Issues:** https://github.com/Floristeady/stories-app/issues
+- **GitHub Issues:** https://github.com/pixelspace-studio/stories-app/issues
 - **Email:** support@pixelspace.com
 
 ## License

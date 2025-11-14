@@ -1,32 +1,29 @@
 # Release Workflow - Stories
 
-**Date:** November 6, 2025  
-**Strategy:** Public releases repo, private source code
+**Date:** November 14, 2025  
+**Strategy:** Open source repository with consolidated releases
 
 ---
 
 ## 🎯 **ESTRATEGIA**
 
-### **Dos repositorios:**
+### **Repositorio único (Open Source):**
 
 ```
-📦 Floristeady/stories-app (PRIVADO)
-   ├── Código fuente
+📦 pixelspace-studio/stories-app (PÚBLICO)
+   ├── Código fuente (MIT License)
    ├── Dependencies
-   └── Todo el desarrollo
-   
-📦 pixelspace-studio/stories-releases (PÚBLICO)
-   ├── Solo .zip compilados
-   ├── latest-mac.yml (metadata)
-   └── README con info de la app
+   ├── Releases públicos
+   └── Auto-update metadata
 ```
 
 **Ventajas:**
-- ✅ Código permanece privado
-- ✅ Releases públicas para auto-update
-- ✅ Branding Pixelspace
-- ✅ Sin costos
-- ✅ Simple y profesional
+- ✅ Open source (MIT License)
+- ✅ Todo en un solo lugar
+- ✅ Community contributions
+- ✅ Releases públicos con auto-update
+- ✅ Branding Pixelspace Studio
+- ✅ Profesional y transparente
 
 ---
 
@@ -34,10 +31,10 @@
 
 ### **Setup Inicial** (una sola vez)
 
-#### **1. Crear repo público**
+#### **1. Repository Setup**
 ```bash
-# ✅ YA CREADO:
-# https://github.com/pixelspace-studio/stories-releases
+# ✅ COMPLETED:
+# https://github.com/pixelspace-studio/stories-app
 ```
 
 #### **2. Instalar GitHub CLI**
@@ -48,7 +45,7 @@ gh auth login
 
 #### **3. Configurar permisos**
 ```bash
-# Dar acceso a pixelspace-studio/stories-releases
+# Access already configured for pixelspace-studio/stories-app
 # Settings → Member privileges → Allow write
 ```
 

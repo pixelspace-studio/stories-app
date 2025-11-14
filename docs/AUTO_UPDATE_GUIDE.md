@@ -161,7 +161,7 @@ This creates:
 
 ```bash
 # On GitHub:
-1. Go to: https://github.com/Floristeady/stories-app/releases/new
+1. Go to: https://github.com/pixelspace-studio/stories-app/releases/new
 2. Tag: v{version} (e.g., v1.0.0)
 3. Title: "Stories v{version}"
 4. Description: Release notes (changelog)

@@ -98,7 +98,7 @@ LOCAL NETWORK (Required)
 📚 DOCUMENTATION
 ───────────────────────────────────────────────────────────────
 
-Full documentation: https://github.com/Floristeady/stories-app
+Full documentation: https://github.com/pixelspace-studio/stories-app
 
 Issues or questions? Open an issue on GitHub!
 

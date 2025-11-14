@@ -190,8 +190,9 @@ git commit -m "Initial release v0.9.8 - Open source release"
 git remote add opensource https://github.com/pixelspace-studio/stories-app.git
 git push opensource main
 
-# 4. Keep private repo as backup
-# Original repo stays at Floristeady/stories-app (private)
+# 4. Keep private repo as backup (historical reference)
+# Original private repo was at Floristeady/stories-app
+# Now consolidated into pixelspace-studio/stories-app (open source)
 ```
 
 ---
