@@ -28,7 +28,7 @@ A powerful desktop application for macOS that converts voice to text using OpenA
 ### For Users (Download & Install)
 
 1. **Download the latest release**
-   - Download `Stories.dmg` from [GitHub Releases](https://github.com/yourusername/stories-app/releases)
+   - Download `Stories.dmg` from [GitHub Releases](https://github.com/pixelspace-studio/stories-app/releases)
 
 2. **Install the app**
    - Open the DMG file
@@ -60,7 +60,7 @@ A powerful desktop application for macOS that converts voice to text using OpenA
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/stories-app.git
+   git clone https://github.com/pixelspace-studio/stories-app.git
    cd stories-app
    ```
 
@@ -106,15 +106,9 @@ npx electron electron/main.js --dev
 
 ### Testing & Diagnostics
 
-The `Tests/` directory contains comprehensive test suites and diagnostic tools:
+The `Tests/` directory contains comprehensive test suites:
 
 ```bash
-# Quick file structure validation
-python3 Tests/check_files.py
-
-# Comprehensive system diagnostics
-python3 Tests/diagnose.py
-
 # Manual backend testing (without Electron)
 python3 Tests/test_manual.py
 
@@ -125,12 +119,9 @@ python3 Tests/test_retry_logic.py        # API retry mechanisms
 python3 Tests/test_window_manager.py     # Window management
 ```
 
-**When to use each:**
-- **check_files.py** - Validate project structure (15 files checked)
-- **diagnose.py** - Debug Python/dependencies/backend issues
+**When to use:**
 - **test_manual.py** - Test backend without Electron (browser-based)
 - **Component tests** - Verify specific subsystems after changes
-- **MANUAL_TESTING_GUIDE.md** - Complete feature testing guide before release
 
 ### Project Structure
 ```
@@ -166,10 +157,8 @@ stories-app/
 │       ├── layout.css    # Base layout & grid system
 │       ├── components.css # Component-specific styles
 │       └── utilities.css  # Utility classes & helpers
-├── Tests/                 # Test suites & diagnostics
-│   ├── MANUAL_TESTING_GUIDE.md # Complete testing guide
-│   ├── check_files.py    # File structure validation
-│   ├── diagnose.py       # System diagnostics
+├── Tests/                 # Test suites
+│   ├── README_TESTS.md   # Testing documentation
 │   └── test_*.py         # Component-specific tests
 ├── docs/                  # Documentation
 │   ├── PRD.md            # Product Requirements Document
@@ -308,14 +297,14 @@ If transcriptions complete but text doesn't paste automatically:
 
 ### Diagnostic Tools
 ```bash
-# Run comprehensive diagnostics
-python3 Tests/diagnose.py
-
-# Check file structure
-python3 Tests/check_files.py
-
 # Test backend directly
 python3 Tests/test_manual.py
+
+# Run component tests
+python3 Tests/test_audio_storage.py
+python3 Tests/test_config_system.py
+python3 Tests/test_retry_logic.py
+python3 Tests/test_window_manager.py
 ```
 
 ## Customization
@@ -454,11 +443,14 @@ Stories stores data in these locations:
 
 ## Contributing
 
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+Quick start:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Make your changes and test
+4. Commit with clear messages
+5. Push and open a Pull Request
 
 ## License
 
@@ -474,8 +466,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/stories-app/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/stories-app/discussions)
+- **Issues**: [GitHub Issues](https://github.com/pixelspace-studio/stories-app/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/pixelspace-studio/stories-app/discussions)
 
 ---
 
