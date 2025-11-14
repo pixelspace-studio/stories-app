@@ -1,37 +1,55 @@
 # Telemetry System - Stories App
 
-**Last Updated:** November 4, 2025  
-**Status:** ✅ Active (v0.9.7+)
+**Last Updated:** November 14, 2025  
+**Status:** ✅ Optional (v0.9.8+)
 
 ---
 
 ## 📊 Overview
 
-Stories includes a **self-hosted, privacy-first telemetry system** to understand how users interact with the app and identify opportunities for improvement.
+Stories includes an **optional, self-hosted, privacy-first telemetry system** for analytics and crash reporting.
 
-### Why Telemetry?
+### 🎯 Two Build Types
 
-- **Improve Product:** Understand which features users love and which need work
-- **Monitor Stability:** Track crash rates and error patterns
-- **Estimate Costs:** Monitor OpenAI API usage for financial planning
-- **Prioritize Features:** Data-driven decisions on what to build next
+**Community Builds (GitHub Releases):**
+- ✅ **NO telemetry** by default
+- ✅ Privacy-first
+- ✅ Zero tracking
+- Built with: `npm run make:community`
+
+**Internal Builds (Optional):**
+- Can enable telemetry if desired
+- Useful for self-hosting analytics
+- Built with: `npm run make:internal`
+- Requires `telemetry.config.js` setup
+
+### Why Include Telemetry Code?
+
+The telemetry system is **completely optional** and included for:
+- **Self-hosting:** Deploy your own analytics backend
+- **Transparency:** All code is open source and auditable
+- **Flexibility:** Enable only if you want analytics
+
+**GitHub Releases have telemetry disabled by default.**
 
 ### Key Principles
 
-1. ✅ **Privacy First** - Zero PII, no transcriptions, no API keys
-2. ✅ **Anonymous** - UUID-based identification only
-3. ✅ **Opt-out Available** - Usage telemetry can be disabled
-4. ✅ **Crash Reports Always On** - Critical for stability (cannot opt-out)
-5. ✅ **Fail Silently** - Never interrupts user experience
-6. ✅ **Self-Hosted** - Full control over data (Render.com + PostgreSQL)
+1. ✅ **Opt-in Only** - Community builds have NO telemetry
+2. ✅ **Privacy First** - Zero PII, no transcriptions, no API keys
+3. ✅ **Anonymous** - UUID-based identification only (when enabled)
+4. ✅ **Fail Silently** - Never interrupts user experience
+5. ✅ **Self-Hosted** - Deploy to any server (Render.com, Heroku, etc.)
+6. ✅ **Open Source** - All code visible in `/analytics` directory
 
 ---
 
-## 📦 What Data We Capture
+## 📦 What Data CAN Be Captured (If Enabled)
 
-### ✅ **Usage Events (Opt-out Available)**
+**Note:** GitHub Releases (community builds) do NOT collect any data.
 
-Users can disable this in Settings → "Share Anonymous Usage Data"
+### ✅ **Usage Events (If Telemetry Enabled)**
+
+Only in internal builds with telemetry configured:
 
 **Events tracked:**
 
@@ -53,9 +71,9 @@ Users can disable this in Settings → "Share Anonymous Usage Data"
 
 ---
 
-### 🔴 **Crash Reports (Always On)**
+### 🔴 **Crash Reports (If Enabled)**
 
-Cannot be disabled - critical for app stability.
+Only collected in internal builds with telemetry enabled:
 
 **Data captured on crash:**
 
@@ -115,11 +133,18 @@ Cannot be disabled - critical for app stability.
 4. **Store in DB** → PostgreSQL stores events with timestamps
 5. **View Dashboard** → Aggregated stats viewable at `/dashboard`
 
-### Opt-out Mechanism
+### Build Types
 
-Users can toggle "Share Anonymous Usage Data" in Settings:
-- **ON** (default): Usage events sent
-- **OFF**: Only crash reports sent (critical for stability)
+**Community Builds (Default):**
+- Telemetry: **DISABLED**
+- No data collection
+- Built with: `npm run make` or `npm run make:community`
+
+**Internal Builds:**
+- Telemetry: **Optional** (configurable)
+- Requires `telemetry.config.js` setup
+- Built with: `npm run make:internal`
+- Users can toggle in Settings
 
 ---
 

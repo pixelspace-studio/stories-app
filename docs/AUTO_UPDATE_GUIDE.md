@@ -294,7 +294,7 @@ autoUpdater.autoDownload = false; // ← User must confirm
 {
   "publish": {
     "provider": "github",
-    "owner": "Floristeady",
+    "owner": "pixelspace-studio",
     "repo": "stories-app"
   }
 }

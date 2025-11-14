@@ -71,12 +71,12 @@ npm run notarize:check
 
 ### **View status of specific notarization:**
 ```bash
-xcrun notarytool info <SUBMISSION_ID> --keychain-profile "pixelspace-notarize"
+xcrun notarytool info <SUBMISSION_ID> --keychain-profile "your-profile-name"
 ```
 
 ### **View notarization error log:**
 ```bash
-xcrun notarytool log <SUBMISSION_ID> --keychain-profile "pixelspace-notarize"
+xcrun notarytool log <SUBMISSION_ID> --keychain-profile "your-profile-name"
 ```
 
 ### **Verify app signature:**
@@ -100,13 +100,14 @@ xcrun stapler validate out/make/Stories.dmg
 
 ### **Error: "No signature found"**
 The file is not signed. Make sure to:
-1. Have the certificate "Developer ID Application: Pixelspace, LLC (N7MMJYTBG2)" installed
+1. Have a valid Developer ID Application certificate installed
 2. Verify with: `security find-identity -v -p codesigning`
+3. See `docs/CODE_SIGNING.md` for setup instructions
 
 ### **Error: "Notarization failed - Invalid"**
 View the error log:
 ```bash
-xcrun notarytool log <SUBMISSION_ID> --keychain-profile "pixelspace-notarize"
+xcrun notarytool log <SUBMISSION_ID> --keychain-profile "your-profile-name"
 ```
 
 Common causes:
@@ -117,16 +118,18 @@ Common causes:
 ### **Error: "No authentication properties provided"**
 Apple credentials are not configured. Verify:
 ```bash
-xcrun notarytool history --keychain-profile "pixelspace-notarize"
+xcrun notarytool history --keychain-profile "your-profile-name"
 ```
 
 If it fails, reconfigure:
 ```bash
-xcrun notarytool store-credentials "pixelspace-notarize" \
+xcrun notarytool store-credentials "your-profile-name" \
   --apple-id "your@email.com" \
-  --password "xxxx-xxxx-xxxx-xxxx" \
-  --team-id "N7MMJYTBG2"
+  --password "app-specific-password" \
+  --team-id "YOUR_TEAM_ID"
 ```
+
+See `docs/CODE_SIGNING.md` for detailed setup instructions.
 
 ### **Notarization takes more than 30 minutes**
 Apple sometimes has delays. You can:
@@ -151,7 +154,7 @@ out/make/
 ```
 
 The DMG is:
-✅ Signed with Pixelspace, LLC certificate
+✅ Signed with your Developer ID certificate
 ✅ Notarized by Apple
 ✅ Ready to distribute without warnings
 
