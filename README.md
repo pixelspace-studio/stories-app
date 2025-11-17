@@ -1,5 +1,8 @@
 # Stories v0.9.8
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/github/v/release/pixelspace-studio/stories-app)](https://github.com/pixelspace-studio/stories-app/releases)
+
 A powerful desktop application for macOS that converts voice to text using OpenAI's Whisper API. Features intelligent auto-paste, transcription history, menu bar status icon, and global shortcuts for maximum productivity.
 
 ## Key Features
