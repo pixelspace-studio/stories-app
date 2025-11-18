@@ -1241,18 +1241,31 @@ class VoiceToTextApp {
                 let cost_usd = result.cost_usd ?? result.cost;
                 const duration = result.duration_seconds || audioDurationSeconds || 0;
                 
+                // DEBUG: Log what we received from backend
+                console.log('🔍 DEBUG - Cost from backend:', {
+                    'result.cost_usd': result.cost_usd,
+                    'result.cost': result.cost,
+                    'cost_usd (after ?? operator)': cost_usd,
+                    'duration': duration
+                });
+                
                 // If cost is missing, zero, or invalid, calculate it from duration
                 if (cost_usd === undefined || cost_usd === null || cost_usd === 0) {
                     if (duration > 0) {
                         const minutes = duration / 60.0;
                         cost_usd = minutes * 0.006; // Whisper pricing: $0.006 per minute
+                        console.log('🔍 DEBUG - Recalculated cost from duration:', cost_usd);
                     } else {
                         cost_usd = 0;
+                        console.log('🔍 DEBUG - No duration, cost set to 0');
                     }
                 } else {
                     // Ensure cost is a valid number
                     cost_usd = parseFloat(cost_usd) || 0;
+                    console.log('🔍 DEBUG - Using backend cost (parsed):', cost_usd);
                 }
+                
+                console.log('🔍 DEBUG - Final cost_usd before telemetry:', cost_usd);
                 
                 await this.telemetry.track('transcription_completed', {
                     duration_seconds: result.duration_seconds || audioDurationSeconds || 0,
