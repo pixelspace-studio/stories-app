@@ -24,7 +24,7 @@ class TelemetryClient {
         // Load telemetry configuration
         this.config = this.loadConfig();
         this.apiUrl = this.config.apiUrl;
-        this.debug = this.config.debug;
+        this.debug = true; // TEMPORARY: Enable for debugging cost_usd issue
         
         // Detect app version and platform
         this.appVersion = this.getAppVersion();
@@ -53,7 +53,8 @@ class TelemetryClient {
         // Default fallback (for community builds or if config fails)
         return {
             apiUrl: 'http://localhost:5000', // Fallback (won't be used in community builds anyway)
-            debug: false
+            debug: false,
+            forceEnableInDev: false // Default: disabled
         };
     }
     
@@ -149,6 +150,13 @@ class TelemetryClient {
         const isInternal = this.isInternalBuild();
         
         if (!isInternal) {
+            // Check if force enable in dev mode
+            if (this.config.forceEnableInDev) {
+                console.log('📊 Telemetry FORCE ENABLED in dev mode (forceEnableInDev = true)');
+                this.enabled = true;
+                return;
+            }
+            
             console.log('🔕 Telemetry disabled (community build from GitHub)');
             this.enabled = false;
             return;
@@ -383,6 +391,16 @@ class TelemetryClient {
         }
         
         try {
+            // DEBUG: Log transcription_completed before creating event
+            if (eventName === 'transcription_completed') {
+                console.log('🔍 DEBUG - track() called with:', {
+                    eventName,
+                    properties,
+                    cost_usd: properties.cost_usd,
+                    cost_usd_type: typeof properties.cost_usd
+                });
+            }
+            
             const event = {
                 user_id: this.userId,
                 event: eventName,
@@ -392,6 +410,16 @@ class TelemetryClient {
                 platform: this.platform,
                 country: this.country
             };
+            
+            // DEBUG: Log event object
+            if (eventName === 'transcription_completed') {
+                console.log('🔍 DEBUG - event object created:', {
+                    event: event.event,
+                    properties: event.properties,
+                    cost_usd: event.properties.cost_usd,
+                    cost_usd_type: typeof event.properties.cost_usd
+                });
+            }
             
             // Add to queue
             this.eventQueue.push(event);
@@ -494,12 +522,27 @@ class TelemetryClient {
             
             this.log(`📤 Sending batch of ${batch.length} events...`);
             
+            // DEBUG: Log transcription_completed events in batch
+            batch.forEach((event, idx) => {
+                if (event.event === 'transcription_completed') {
+                    console.log(`🔍 DEBUG - sendBatch() event ${idx}:`, {
+                        event: event.event,
+                        properties: event.properties,
+                        cost_usd: event.properties.cost_usd,
+                        cost_usd_type: typeof event.properties.cost_usd
+                    });
+                }
+            });
+            
+            const payload = { events: batch };
+            console.log('🔍 DEBUG - Payload being sent:', JSON.stringify(payload, null, 2));
+            
             const response = await fetch(`${this.apiUrl}/track`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ events: batch })
+                body: JSON.stringify(payload)
             });
             
             if (response.ok) {

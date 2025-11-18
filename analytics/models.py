@@ -132,6 +132,25 @@ def validate_event(event_data):
                     elif props['estimated_cost_usd'] < 0:
                         errors.append("estimated_cost_usd cannot be negative")
             
+            if event_data.get('event') == 'transcription_completed':
+                if 'duration_seconds' in props:
+                    if not isinstance(props['duration_seconds'], (int, float)):
+                        errors.append("duration_seconds must be a number")
+                    elif props['duration_seconds'] < 0:
+                        errors.append("duration_seconds cannot be negative")
+                
+                if 'cost_usd' in props:
+                    if not isinstance(props['cost_usd'], (int, float)):
+                        errors.append("cost_usd must be a number")
+                    elif props['cost_usd'] < 0:
+                        errors.append("cost_usd cannot be negative")
+                
+                if 'word_count' in props:
+                    if not isinstance(props['word_count'], int):
+                        errors.append("word_count must be an integer")
+                    elif props['word_count'] < 0:
+                        errors.append("word_count cannot be negative")
+            
             if event_data.get('event') == 'feature_toggled':
                 if 'feature' not in props:
                     errors.append("feature_toggled event must have 'feature' property")

@@ -125,6 +125,13 @@ def track_events():
                 'error': 'Missing required field: events'
             }), 400
         
+        # DEBUG: Log raw incoming data for transcription_completed events
+        for event in data.get('events', []):
+            if event.get('event') == 'transcription_completed':
+                logger.info(f"🔍 DEBUG - Raw transcription_completed event received:")
+                logger.info(f"   properties: {event.get('properties', {})}")
+                logger.info(f"   cost_usd in properties: {event.get('properties', {}).get('cost_usd')}")
+        
         # Validate events
         is_valid, errors, cleaned_events = validate_events_batch(data['events'])
         
@@ -134,6 +141,13 @@ def track_events():
                 'error': 'Validation failed',
                 'details': errors
             }), 400
+        
+        # DEBUG: Log cleaned events
+        for event in cleaned_events:
+            if event.get('event') == 'transcription_completed':
+                logger.info(f"🔍 DEBUG - Cleaned transcription_completed event:")
+                logger.info(f"   properties: {event.get('properties', {})}")
+                logger.info(f"   cost_usd in properties: {event.get('properties', {}).get('cost_usd')}")
         
         # Insert events into database
         count = insert_events(cleaned_events)
