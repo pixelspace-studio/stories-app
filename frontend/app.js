@@ -162,20 +162,26 @@ class VoiceToTextApp {
             // Check if telemetry UI should be shown (only in internal builds)
             this.setupTelemetryUI();
             
-            // Only sync preferences for internal builds
-            // Community builds have telemetry permanently disabled
-            if (this.telemetry.isInternalBuild()) {
-                // Load telemetry preference from backend
-                const response = await fetch(`${this.backendUrl}/api/config/settings/telemetry_enabled`);
-                if (response.ok) {
-                    const data = await response.json();
-                    const isEnabled = data.value !== false; // Default to true
-                    this.telemetry.setEnabled(isEnabled);
-                    console.log('📊 Telemetry:', isEnabled ? 'Enabled' : 'Disabled');
+            // Check if telemetry is force-enabled in dev mode
+            const isForceEnabled = this.telemetry.config && this.telemetry.config.forceEnableInDev;
+            
+            // Only sync preferences for internal builds (or force-enabled dev builds)
+            if (this.telemetry.isInternalBuild() || isForceEnabled) {
+                // Load telemetry preference from backend (skip if force-enabled)
+                if (isForceEnabled) {
+                    console.log('📊 Telemetry: Force enabled in dev mode');
                 } else {
-                    // Default to enabled if can't load preference (internal builds only)
-                    this.telemetry.setEnabled(true);
-                    console.log('📊 Telemetry: Enabled (default)');
+                    const response = await fetch(`${this.backendUrl}/api/config/settings/telemetry_enabled`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        const isEnabled = data.value !== false; // Default to true
+                        this.telemetry.setEnabled(isEnabled);
+                        console.log('📊 Telemetry:', isEnabled ? 'Enabled' : 'Disabled');
+                    } else {
+                        // Default to enabled if can't load preference (internal builds only)
+                        this.telemetry.setEnabled(true);
+                        console.log('📊 Telemetry: Enabled (default)');
+                    }
                 }
             } else {
                 console.log('📊 Telemetry: Disabled (community build)');
@@ -204,13 +210,18 @@ class VoiceToTextApp {
             return; // Element not found
         }
         
-        // Check if this is an internal build
+        // Check if this is an internal build or force-enabled in dev
         const isInternalBuild = this.telemetry.isInternalBuild();
+        const isForceEnabled = this.telemetry.config && this.telemetry.config.forceEnableInDev;
         
-        if (isInternalBuild) {
-            // Show telemetry settings (internal build)
+        if (isInternalBuild || isForceEnabled) {
+            // Show telemetry settings (internal build or dev mode)
             telemetryContainer.style.display = 'block';
-            console.log('📊 Telemetry UI: Visible (internal build)');
+            if (isForceEnabled) {
+                console.log('📊 Telemetry UI: Visible (force-enabled in dev)');
+            } else {
+                console.log('📊 Telemetry UI: Visible (internal build)');
+            }
         } else {
             // Hide telemetry settings (community build)
             telemetryContainer.style.display = 'none';
