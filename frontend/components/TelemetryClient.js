@@ -24,7 +24,7 @@ class TelemetryClient {
         // Load telemetry configuration
         this.config = this.loadConfig();
         this.apiUrl = this.config.apiUrl;
-        this.debug = true; // TEMPORARY: Enable for debugging cost_usd issue
+        this.debug = this.config.debug;
         
         // Detect app version and platform
         this.appVersion = this.getAppVersion();
@@ -391,16 +391,6 @@ class TelemetryClient {
         }
         
         try {
-            // DEBUG: Log transcription_completed before creating event
-            if (eventName === 'transcription_completed') {
-                console.log('🔍 DEBUG - track() called with:', {
-                    eventName,
-                    properties,
-                    cost_usd: properties.cost_usd,
-                    cost_usd_type: typeof properties.cost_usd
-                });
-            }
-            
             const event = {
                 user_id: this.userId,
                 event: eventName,
@@ -410,16 +400,6 @@ class TelemetryClient {
                 platform: this.platform,
                 country: this.country
             };
-            
-            // DEBUG: Log event object
-            if (eventName === 'transcription_completed') {
-                console.log('🔍 DEBUG - event object created:', {
-                    event: event.event,
-                    properties: event.properties,
-                    cost_usd: event.properties.cost_usd,
-                    cost_usd_type: typeof event.properties.cost_usd
-                });
-            }
             
             // Add to queue
             this.eventQueue.push(event);
@@ -522,27 +502,12 @@ class TelemetryClient {
             
             this.log(`📤 Sending batch of ${batch.length} events...`);
             
-            // DEBUG: Log transcription_completed events in batch
-            batch.forEach((event, idx) => {
-                if (event.event === 'transcription_completed') {
-                    console.log(`🔍 DEBUG - sendBatch() event ${idx}:`, {
-                        event: event.event,
-                        properties: event.properties,
-                        cost_usd: event.properties.cost_usd,
-                        cost_usd_type: typeof event.properties.cost_usd
-                    });
-                }
-            });
-            
-            const payload = { events: batch };
-            console.log('🔍 DEBUG - Payload being sent:', JSON.stringify(payload, null, 2));
-            
             const response = await fetch(`${this.apiUrl}/track`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ events: batch })
             });
             
             if (response.ok) {
