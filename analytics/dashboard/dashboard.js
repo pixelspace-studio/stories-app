@@ -809,7 +809,7 @@ async function loadRecentRecordings() {
             const duration = parseFloat(properties.duration_seconds || properties.audio_duration_seconds || 0);
             
             // Support both cost_usd and estimated_cost_usd
-            // If cost is missing (undefined/null), calculate it from duration (Whisper pricing: $0.006 per minute)
+            // If cost is missing (undefined/null) or zero, calculate it from duration (Whisper pricing: $0.006 per minute)
             let cost = properties.cost_usd ?? properties.estimated_cost_usd;
             
             // DEBUG: Log cost information for first event
@@ -824,8 +824,9 @@ async function loadRecentRecordings() {
                 });
             }
             
-            if (cost === undefined || cost === null || cost === '') {
-                // Calculate cost from duration if not present
+            // If cost is missing, null, empty string, OR zero (but we have duration), recalculate
+            if (cost === undefined || cost === null || cost === '' || (cost === 0 && duration > 0)) {
+                // Calculate cost from duration if not present or if it's zero with valid duration
                 if (duration > 0) {
                     const minutes = duration / 60.0;
                     cost = minutes * 0.006;
