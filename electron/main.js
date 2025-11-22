@@ -1985,6 +1985,11 @@ ipcMain.handle('request-widget-hide', async (event) => {
         console.log('🪟 Cleared previous widget hide timeout');
       }
       
+      // CRITICAL: Store focus state BEFORE hiding widget
+      // When widget hides, macOS might automatically bring main window to front
+      // We need to prevent this by not doing anything that would trigger focus
+      const wasMainWindowFocused = mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused();
+      
       // STRATEGY: Wait for widget to become inactive, THEN hide
       // This handles the case where widget is still transcribing when this is called
       // MAX ATTEMPTS: 20 attempts × 500ms = 10 seconds maximum wait
@@ -1998,7 +2003,15 @@ ipcMain.handle('request-widget-hide', async (event) => {
             // Widget is inactive, safe to hide
             if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
               isWidgetActive = false; // Mark widget as inactive
-          widgetWindow.hide();
+              widgetWindow.hide();
+              // CRITICAL: Don't bring main window to front when hiding widget
+              // If user was in another app, they should stay there
+              // Only restore focus if main window was already focused (user was in Stories)
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+                // Main window lost focus unexpectedly, restore it only if it was focused before
+                mainWindow.focus();
+              }
+              // If wasMainWindowFocused = false, do nothing - user stays in their current app
             }
           } else if (attempt < maxAttempts) {
             // Widget is still recording/transcribing, wait 500ms and check again
@@ -2009,6 +2022,10 @@ ipcMain.handle('request-widget-hide', async (event) => {
             if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
               isWidgetActive = false; // Mark widget as inactive
               widgetWindow.hide();
+              // Same focus logic: only restore if it was focused before
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+                mainWindow.focus();
+              }
             }
           }
         } catch (err) {
@@ -2017,6 +2034,10 @@ ipcMain.handle('request-widget-hide', async (event) => {
           if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
             isWidgetActive = false; // Mark widget as inactive
             widgetWindow.hide();
+            // Same focus logic: only restore if it was focused before
+            if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+              mainWindow.focus();
+            }
           }
         }
       };
@@ -2550,6 +2571,8 @@ ipcMain.handle('sync-recording-state', (event, message) => {
     isRecording = false;
     console.log('🚫 Recording cancelled - reverting tray to idle');
     updateTrayState('idle');
+    // CRITICAL: Don't show or focus main window when cancelling
+    // This prevents the main window from coming to front when user cancels recording
   } else if (message === 'widget_transcribing' || message === 'main_transcribing') {
     // Update tray to processing state (orange dot)
     updateTrayState('processing');

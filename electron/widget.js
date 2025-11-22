@@ -370,6 +370,41 @@ class WidgetApp {
                 }
             };
             
+            // CRITICAL: Handle MediaRecorder errors (mic disconnected, system error, etc.)
+            this.mediaRecorder.onerror = (event) => {
+                console.error('🚨 MediaRecorder ERROR:', event.error);
+                console.error('🚨 Error name:', event.error?.name);
+                console.error('🚨 Error message:', event.error?.message);
+                console.error('🚨 MediaRecorder state:', this.mediaRecorder?.state);
+                
+                // Cancel recording due to error
+                this.cancelRecording('media_recorder_error');
+            };
+            
+            // CRITICAL: Handle audio track ending unexpectedly (mic disconnected, permission revoked, etc.)
+            const audioTracks = stream.getAudioTracks();
+            if (audioTracks.length > 0) {
+                audioTracks[0].onended = () => {
+                    console.error('🚨 Audio track ended unexpectedly');
+                    console.error('🚨 Track state:', audioTracks[0].readyState);
+                    console.error('🚨 Track enabled:', audioTracks[0].enabled);
+                    console.error('🚨 Track muted:', audioTracks[0].muted);
+                    
+                    // Cancel recording if track ends while recording
+                    if (this.isRecording && this.mediaRecorder?.state === 'recording') {
+                        this.cancelRecording('audio_track_ended');
+                    }
+                };
+                
+                audioTracks[0].onmute = () => {
+                    console.warn('⚠️ Audio track muted');
+                };
+                
+                audioTracks[0].onunmute = () => {
+                    console.log('✅ Audio track unmuted');
+                };
+            }
+            
             this.mediaRecorder.start();
             console.log('🎛️ MediaRecorder started');
             
