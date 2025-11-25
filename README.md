@@ -333,3 +333,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 Made with care for productivity enthusiasts
+
+**Support us**: [Donate via PayPal](https://www.paypal.com/donate?hosted_button_id=V5SR2ZHAV47HN)
