@@ -74,6 +74,9 @@ from dictionary_manager import get_default_dictionary_manager
 # Import window manager
 from window_manager import get_shared_window_manager, WindowType, RecordingState
 
+# Import fluid transcription
+from fluid_transcription import register_fluid_routes
+
 # ============================================================================
 # ERROR MESSAGE HELPERS
 # ============================================================================
@@ -2308,6 +2311,15 @@ def update_permission_status():
         }), 500
 
 
+# Register fluid transcription routes
+register_fluid_routes(
+    app,
+    get_openai_client=get_openai_client,
+    generate_whisper_prompt=generate_whisper_prompt_from_dictionary,
+    save_transcription_fn=save_transcription,
+    DATABASE_PATH=DATABASE_PATH
+)
+
 if __name__ == '__main__':
     # Check for API key
     if not os.getenv('OPENAI_API_KEY'):
@@ -2357,6 +2369,9 @@ if __name__ == '__main__':
     print("   - POST /api/window/reset")
     print("   - GET  /api/permissions/status")
     print("   - POST /api/permissions/update")
+    print("   - POST /api/transcribe/chunk")
+    print("   - POST /api/transcribe/fluid-complete")
+    print("   - POST /api/transcribe/save-audio")
     print("=" * 50)
     
     # Port fallback configuration

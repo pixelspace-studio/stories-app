@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Voice to Text - Widget</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; worker-src 'self'; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
     <!-- Theme CSS -->
     <link rel="stylesheet" href="../frontend/css/theme.css">
     <!-- Phosphor Icons CSS -->
@@ -356,6 +356,8 @@
 
     <!-- Telemetry Client -->
     <script src="../frontend/components/TelemetryClient.js"></script>
+    <!-- Fluid Transcription Manager -->
+    <script src="../frontend/components/FluidTranscriptionManager.js"></script>
     <!-- Widget JavaScript -->
     <script src="widget.js"></script>
 </body>

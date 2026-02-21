@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; worker-src 'self'; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
     <title>Stories</title>
     <link rel="stylesheet" href="../frontend/css/theme.css">
     <link rel="stylesheet" href="../frontend/css/layout.css">
@@ -193,6 +193,22 @@
             </div>
                 </div>
                 
+                <!-- Fluid Transcription Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Fluid transcription</span>
+                            <span class="setting-tooltip" title="Transcribe in real-time while recording for faster results">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="fluidTranscriptionToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Telemetry Toggle (only shown in internal builds) -->
                 <div id="telemetrySettingContainer" class="setting-item setting-item-vertical" style="display: none;">
                     <div class="setting-row">
@@ -443,7 +459,8 @@
     <script src="../frontend/components/UIStateController.js"></script>
     <script src="../frontend/components/SoundManager.js"></script>
     <script src="../frontend/components/UpdateManager.js"></script>
-    
+    <script src="../frontend/components/FluidTranscriptionManager.js"></script>
+
     <!-- Main App Script -->
     <script src="../frontend/app.js"></script>
     

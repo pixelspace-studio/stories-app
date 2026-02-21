@@ -1,0 +1,247 @@
+"""
+Fluid Transcription Module
+Handles real-time chunk-by-chunk transcription during recording.
+Two endpoints:
+  - POST /api/transcribe/chunk   → transcribe a single WAV chunk
+  - POST /api/transcribe/fluid-complete → save final assembled transcription
+"""
+
+import os
+import tempfile
+import logging
+from datetime import datetime
+from flask import request, jsonify
+
+from retry_logic import create_openai_transcription
+from audio_storage import save_temp_audio_with_metadata_safe
+
+logger = logging.getLogger(__name__)
+
+
+def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_transcription_fn, DATABASE_PATH):
+    """
+    Register fluid transcription routes on the Flask app.
+
+    Args:
+        app: Flask app instance
+        get_openai_client: callable that returns an OpenAI client
+        generate_whisper_prompt: callable that returns whisper prompt string
+        save_transcription_fn: callable to save transcription to DB
+        DATABASE_PATH: path to SQLite database
+    """
+
+    @app.route('/api/transcribe/chunk', methods=['POST'])
+    def transcribe_chunk():
+        """
+        Transcribe a single WAV audio chunk.
+        Lightweight — no DB write, no audio storage.
+
+        Request: multipart/form-data { audio: WAV, session_id: str, segment_index: int }
+        Response: { text: str, segment_index: int, language: str, duration: float }
+        """
+        try:
+            # Validate audio file
+            if 'audio' not in request.files:
+                return jsonify({"error": "No audio file provided", "segment_index": -1, "retryable": False}), 400
+
+            audio_file = request.files['audio']
+            session_id = request.form.get('session_id', 'unknown')
+            segment_index = int(request.form.get('segment_index', 0))
+
+            logger.info(f"🔄 Fluid chunk received: session={session_id}, segment={segment_index}")
+
+            # Get OpenAI client
+            client = get_openai_client()
+            if not client:
+                return jsonify({
+                    "error": "OpenAI API key not configured",
+                    "segment_index": segment_index,
+                    "retryable": False
+                }), 401
+
+            # Save audio to temp file for Whisper API
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                    audio_file.save(tmp)
+                    temp_path = tmp.name
+
+                # Get dictionary prompt
+                prompt = generate_whisper_prompt()
+
+                # Transcribe with quick retry (max 2 attempts)
+                result = create_openai_transcription(
+                    audio_file_path=temp_path,
+                    client=client,
+                    model="whisper-1",
+                    response_format="verbose_json",
+                    prompt=prompt,
+                    audio_duration=None  # Let Whisper detect from WAV
+                )
+
+                logger.info(f"✅ Fluid chunk transcribed: session={session_id}, segment={segment_index}, "
+                          f"chars={len(result.get('text', ''))}")
+
+                return jsonify({
+                    "text": result.get("text", ""),
+                    "segment_index": segment_index,
+                    "language": result.get("language", "unknown"),
+                    "duration": result.get("duration", 0)
+                })
+
+            finally:
+                # Always clean up temp file
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+        except Exception as e:
+            logger.error(f"❌ Fluid chunk error: session={request.form.get('session_id', '?')}, "
+                        f"segment={request.form.get('segment_index', '?')}, error={e}")
+
+            error_str = str(e).lower()
+            retryable = not any(x in error_str for x in ['api key', 'auth', '401', '403'])
+
+            return jsonify({
+                "error": str(e),
+                "segment_index": int(request.form.get('segment_index', 0)),
+                "retryable": retryable
+            }), 500
+
+
+    @app.route('/api/transcribe/fluid-complete', methods=['POST'])
+    def fluid_complete():
+        """
+        Save final assembled transcription from fluid mode.
+
+        Request JSON:
+            text: str               - Full assembled text with <seg> tags
+            session_id: str         - Recording session ID
+            total_segments: int     - Total number of chunks
+            failed_segments: int    - Number of failed chunks
+            total_duration: float   - Total recording duration in seconds
+            language: str           - Detected language
+            audio_id: str|null      - ID of saved audio file (from MediaRecorder WebM)
+
+        Response: { transcription_id: int, text: str, status: str }
+        """
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No JSON data provided"}), 400
+
+            text = data.get('text', '')
+            session_id = data.get('session_id', 'unknown')
+            total_segments = data.get('total_segments', 0)
+            failed_segments = data.get('failed_segments', 0)
+            total_duration = data.get('total_duration', 0)
+            language = data.get('language', 'unknown')
+            audio_id = data.get('audio_id', None)
+
+            if not text.strip():
+                return jsonify({"error": "No transcription text provided"}), 400
+
+            # Determine status
+            if failed_segments > 0:
+                status = 'partial'
+            else:
+                status = 'success'
+
+            logger.info(f"📝 Fluid complete: session={session_id}, segments={total_segments}, "
+                       f"failed={failed_segments}, status={status}, duration={total_duration:.1f}s")
+
+            # Strip <seg> tags for clean text storage
+            clean_text = text
+            import re
+            clean_text = re.sub(r'<seg[^>]*>', '', clean_text)
+            clean_text = re.sub(r'</seg>', ' ', clean_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+            # Save to database using existing function
+            transcription_data = {
+                'text': clean_text,
+                'language': language,
+                'duration': total_duration
+            }
+
+            error_message = None
+            if failed_segments > 0:
+                error_message = f"Fluid transcription: {failed_segments}/{total_segments} segments failed"
+
+            transcription_id = save_transcription_fn(
+                transcription_data,
+                audio_id=audio_id,
+                status=status,
+                error_message=error_message
+            )
+
+            logger.info(f"✅ Fluid transcription saved: id={transcription_id}, status={status}")
+
+            return jsonify({
+                "transcription_id": transcription_id,
+                "text": clean_text,
+                "status": status
+            })
+
+        except Exception as e:
+            logger.error(f"❌ Fluid complete error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+
+    @app.route('/api/transcribe/save-audio', methods=['POST'])
+    def save_audio_only():
+        """
+        Save audio file without transcribing.
+        Used by fluid mode to persist the full WebM recording.
+
+        Request: multipart/form-data { audio: webm file }
+        Response: { audio_id: str, saved_path: str }
+        """
+        try:
+            if 'audio' not in request.files:
+                return jsonify({"error": "No audio file provided"}), 400
+
+            audio_file = request.files['audio']
+
+            # Save to temp file first
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
+                audio_file.save(tmp.name)
+                temp_path = tmp.name
+
+            try:
+                audio_metadata = {
+                    'original_filename': audio_file.filename,
+                    'upload_timestamp': datetime.now().isoformat(),
+                    'status': 'saved',
+                    'source': 'fluid_transcription'
+                }
+
+                audio_id, saved_path = save_temp_audio_with_metadata_safe(
+                    temp_path=temp_path,
+                    metadata=audio_metadata,
+                    is_failed=False,
+                    timeout=15
+                )
+
+                if audio_id:
+                    logger.info(f"✅ Fluid audio saved: {audio_id}")
+                    return jsonify({
+                        "audio_id": audio_id,
+                        "saved_path": saved_path
+                    })
+                else:
+                    return jsonify({"error": "Audio save timed out", "audio_id": None}), 500
+
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+        except Exception as e:
+            logger.error(f"❌ Fluid save-audio error: {e}")
+            return jsonify({"error": str(e)}), 500

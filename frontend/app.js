@@ -67,6 +67,11 @@ class VoiceToTextApp {
         this.isCancelled = false;
         this.hasApiKey = false; // Track API key status
         this.safetyTimeout = null; // Safety timeout for max recording time
+
+        // Fluid Transcription
+        this.fluidTranscription = null;  // Initialized after API ready
+        this.isFluidEnabled = false;     // Loaded from settings
+        this._fluidStopping = false;     // Guard flag for onstop handler
         
         // 🔧 Recording configuration (received from main process)
         // These values are set by main.js to keep main window and widget in sync
@@ -135,6 +140,7 @@ class VoiceToTextApp {
         // Initialize managers that depend on API
         this.shortcuts = new ShortcutManager(this.api);
         this.dictionary = new DictionaryManager(this.api);
+        this.fluidTranscription = new FluidTranscriptionManager(this.api, this.backendUrl);
         
         // Configure DictionaryManager elements (now that dictionary exists)
         this.dictionary.setElements(this.dictionaryContent, this.dictionaryEmpty);
@@ -329,6 +335,7 @@ class VoiceToTextApp {
         this.autoHideWidgetToggle = document.getElementById('autoHideWidgetToggle');
         this.autoPasteToggle = document.getElementById('autoPasteToggle');
         this.telemetryToggle = document.getElementById('telemetryToggle');
+        this.fluidTranscriptionToggle = document.getElementById('fluidTranscriptionToggle');
         this.privacyPolicyLink = document.getElementById('privacyPolicyLink');
         
         // Audio Storage Section
@@ -781,7 +788,14 @@ class VoiceToTextApp {
                 this.toggleSoundEffects();
             });
         }
-        
+
+        // Fluid Transcription toggle
+        if (this.fluidTranscriptionToggle) {
+            this.fluidTranscriptionToggle.addEventListener('change', () => {
+                this.toggleFluidTranscription();
+            });
+        }
+
         // Cleanup Audio link
         if (this.cleanupAudioButton) {
             this.cleanupAudioButton.addEventListener('click', (e) => {
@@ -847,7 +861,10 @@ class VoiceToTextApp {
                 
                 // Initialize SoundManager
                 await this.initializeSoundManager();
-                
+
+                // Load fluid transcription setting
+                await this.loadFluidTranscriptionSetting();
+
                 // Then load transcription history (immediately, no delay)
                 this.loadTranscriptionHistory();
         } catch (error) {
@@ -897,6 +914,9 @@ class VoiceToTextApp {
     }
 
     async startRecording() {
+        // Refresh fluid setting from backend before each recording
+        await this.loadFluidTranscriptionSetting();
+
         // Check if API key is configured
         if (!this.hasApiKey) {
             this.showAlert('warning', 'API Key Required', 'Please add your OpenAI API Key in Settings before recording.');
@@ -941,7 +961,12 @@ class VoiceToTextApp {
             };
 
             this.mediaRecorder.onstop = () => {
-                
+                // If fluid transcription is handling the stop, skip onstop logic
+                if (this._fluidStopping) {
+                    console.log('🔄 Fluid transcription handling stop — onstop skipping');
+                    return;
+                }
+
                 if (!this.isCancelled) {
                     this.processRecording();
                 } else {
@@ -953,6 +978,15 @@ class VoiceToTextApp {
             this.mediaRecorder.start();
             this.isRecording = true;
             this.recordingSource = 'main';
+
+            // Start fluid transcription if enabled
+            console.log(`🔄 Main: fluid enabled=${this.isFluidEnabled}, manager=${!!this.fluidTranscription}`);
+            if (this.isFluidEnabled && this.fluidTranscription) {
+                console.log('🔄 Main: Starting fluid transcription...');
+                this.fluidTranscription.start(stream);
+            } else {
+                console.log('🔄 Main: Fluid OFF — using classic mode');
+            }
             
             // Track recording started
             await this.telemetry.track('recording_started', {
@@ -1034,37 +1068,52 @@ class VoiceToTextApp {
                 clearTimeout(this.safetyTimeout);
                 this.safetyTimeout = null;
             }
-            
+
+            // Check if fluid transcription is active
+            const fluidActive = this.fluidTranscription && this.fluidTranscription.isActive();
+
+            if (fluidActive) {
+                // Fluid mode: prevent processRecording() from running
+                this.isCancelled = true;
+                // Guard: tell onstop handler to skip entirely (fluid handles everything)
+                this._fluidStopping = true;
+            }
+
             this.mediaRecorder.stop();
             this.isRecording = false;
-            
+
             // Calculate recording duration
             const duration = this.startTime ? (Date.now() - this.startTime) / 1000 : 0;
-            
+
             // Track recording completed
             await this.telemetry.track('recording_completed', {
                 source: 'main',
                 duration_seconds: Math.round(duration),
                 platform: await this.getPlatform()
             });
-            
+
             this.recordingSource = null;
-            
+
             // Play record stop sound
             if (window.soundManager) {
                 soundManager.playRecordStop();
             }
-            
+
             // Stop all audio tracks
             this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            
+
             // STATE 4: Transcribing - show timer + "Transcribing..."
             this.updateUIForTranscribing();
             this.stopTimer(); // Keep timer frozen
-            
+
             // Notify widget
             if (window.electronAPI && window.electronAPI.syncRecordingState) {
                 window.electronAPI.syncRecordingState('main_recording_stopped');
+            }
+
+            // If fluid was active, handle fluid stop flow
+            if (fluidActive) {
+                this.handleFluidStop(duration);
             }
         }
     }
@@ -1077,13 +1126,18 @@ class VoiceToTextApp {
         this.isRecording = false;
         this.isCancelled = true;
         this.mediaRecorder.stop();
-        
+
+        // Clean up fluid transcription if active (discard accumulated text)
+        if (this.fluidTranscription && this.fluidTranscription.isActive()) {
+            this.fluidTranscription.stop();
+        }
+
         // Stop all audio tracks
         this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        
+
         this.stopTimer();
         this.updateUIForIdle();
-        
+
         // Notify widget
         if (window.electronAPI && window.electronAPI.syncRecordingState) {
             window.electronAPI.syncRecordingState('main_recording_cancelled');
@@ -2159,7 +2213,10 @@ class VoiceToTextApp {
         
         // Load telemetry setting
         await this.loadTelemetrySetting();
-        
+
+        // Load fluid transcription setting
+        await this.loadFluidTranscriptionSetting();
+
         // Open with ModalManager
         this.modalManager.open('settings', { delay: 10 });
     }
@@ -3399,6 +3456,150 @@ class VoiceToTextApp {
             console.error('❌ Error loading telemetry setting:', error);
             // Default to enabled on error
             this.telemetryToggle.checked = true;
+        }
+    }
+
+    // ====================================
+    // FLUID TRANSCRIPTION
+    // ====================================
+
+    async loadFluidTranscriptionSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.fluid_transcription`);
+            if (response.ok) {
+                const data = await response.json();
+                this.isFluidEnabled = data.value || false;
+                console.log('🔄 Current fluid transcription setting:', this.isFluidEnabled);
+                if (this.fluidTranscriptionToggle) {
+                    this.fluidTranscriptionToggle.checked = this.isFluidEnabled;
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading fluid transcription setting:', error);
+            this.isFluidEnabled = false;
+        }
+    }
+
+    async toggleFluidTranscription() {
+        const isEnabled = this.fluidTranscriptionToggle ? this.fluidTranscriptionToggle.checked : false;
+        this.isFluidEnabled = isEnabled;
+        console.log('🔄 Fluid transcription toggled:', isEnabled);
+
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.fluid_transcription`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: isEnabled })
+            });
+        } catch (error) {
+            console.error('❌ Error saving fluid transcription setting:', error);
+        }
+    }
+
+    async handleFluidStop(recordingDuration) {
+        try {
+            // Stop fluid and get assembled text
+            const fluidResult = await this.fluidTranscription.stop();
+
+            if (!fluidResult.text || !fluidResult.text.trim()) {
+                console.warn('⚠️ Fluid transcription returned empty text');
+                this.updateUIForIdle();
+                this.showToast('No speech detected during recording.', 'error');
+                if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                    window.electronAPI.syncRecordingState('main_transcription_completed');
+                }
+                return;
+            }
+
+            // Save audio from MediaRecorder if save_audio is ON or there were errors
+            let audioId = null;
+            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+            this.audioChunks = []; // Free memory
+
+            // Check save_audio setting
+            let saveAudio = false;
+            try {
+                const resp = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.save_audio_files`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    saveAudio = data.value !== false;
+                }
+            } catch (e) {
+                saveAudio = true; // Default to saving on error
+            }
+
+            if (saveAudio || fluidResult.hasErrors) {
+                // Save audio via existing /api/transcribe mechanism
+                // Send audio to a temp endpoint or save locally
+                try {
+                    const saveFormData = new FormData();
+                    saveFormData.append('audio', audioBlob, 'recording.webm');
+
+                    const saveResp = await fetch(`${this.backendUrl}/api/transcribe/save-audio`, {
+                        method: 'POST',
+                        body: saveFormData
+                    });
+
+                    if (saveResp.ok) {
+                        const saveData = await saveResp.json();
+                        audioId = saveData.audio_id || null;
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Could not save audio for fluid transcription:', e);
+                }
+            }
+
+            // Call fluid-complete endpoint
+            const completeResp = await fetch(`${this.backendUrl}/api/transcribe/fluid-complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: fluidResult.text,
+                    session_id: this.fluidTranscription.sessionId,
+                    total_segments: fluidResult.segments.length,
+                    failed_segments: fluidResult.failedCount,
+                    total_duration: recordingDuration,
+                    language: fluidResult.segments.find(s => s.language !== 'unknown')?.language || 'unknown',
+                    audio_id: audioId
+                })
+            });
+
+            if (completeResp.ok) {
+                const completeData = await completeResp.json();
+                console.log('✅ Fluid transcription saved:', completeData);
+
+                // Play transcription ready sound
+                if (window.soundManager) {
+                    soundManager.playTranscriptionReady();
+                }
+
+                // Update UI
+                this.updateUIForIdle();
+                await this.loadTranscriptionHistory();
+
+                // Auto-paste
+                this.attemptAutoPaste(completeData.text);
+            } else {
+                throw new Error('Failed to save fluid transcription');
+            }
+
+            // Notify widget
+            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                window.electronAPI.syncRecordingState('main_transcription_completed');
+            }
+
+        } catch (error) {
+            console.error('❌ Fluid stop error:', error);
+            this.updateUIForIdle();
+            this.showToast('Error processing fluid transcription. Please try again.', 'error');
+            await this.loadTranscriptionHistory();
+
+            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                window.electronAPI.syncRecordingState('main_transcription_completed');
+            }
+        } finally {
+            this._fluidStopping = false;
+            this.isCancelled = false;
         }
     }
 
