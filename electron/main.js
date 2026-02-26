@@ -1244,16 +1244,9 @@ async function toggleRecording() {
     }
   }
   
-  // If user was already in Stories, restore main window if minimized
-  // DON'T call moveTop() - it reorganizes z-order and moves window behind other apps
-  if (wasInStoriesApp && mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-      console.log('📱 Main window restored (was minimized)');
-    }
-    // Main window is already visible and at correct z-order
-    // Widget will appear on top due to NSPanel + setAlwaysOnTop
-  }
+  // If user was already in Stories, don't touch the main window state.
+  // If the user minimized it, respect that — only the widget needs to appear.
+  // Widget will appear on top due to NSPanel + setAlwaysOnTop regardless.
   
   // CRITICAL: Ensure dock icon stays visible (macOS NSPanel bug fix)
   // Call BEFORE showing widget to prevent race condition
@@ -2007,11 +2000,12 @@ ipcMain.handle('request-widget-hide', async (event) => {
               // CRITICAL: Don't bring main window to front when hiding widget
               // If user was in another app, they should stay there
               // Only restore focus if main window was already focused (user was in Stories)
-              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
                 // Main window lost focus unexpectedly, restore it only if it was focused before
+                // But never unminimize — respect the user's minimized state
                 mainWindow.focus();
               }
-              // If wasMainWindowFocused = false, do nothing - user stays in their current app
+              // If wasMainWindowFocused = false or minimized, do nothing - user stays in their current app
             }
           } else if (attempt < maxAttempts) {
             // Widget is still recording/transcribing, wait 500ms and check again
@@ -2022,8 +2016,8 @@ ipcMain.handle('request-widget-hide', async (event) => {
             if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
               isWidgetActive = false; // Mark widget as inactive
               widgetWindow.hide();
-              // Same focus logic: only restore if it was focused before
-              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+              // Same focus logic: only restore if it was focused before and not minimized
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
                 mainWindow.focus();
               }
             }
@@ -2034,8 +2028,8 @@ ipcMain.handle('request-widget-hide', async (event) => {
           if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
             isWidgetActive = false; // Mark widget as inactive
             widgetWindow.hide();
-            // Same focus logic: only restore if it was focused before
-            if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+            // Same focus logic: only restore if it was focused before and not minimized
+            if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
               mainWindow.focus();
             }
           }

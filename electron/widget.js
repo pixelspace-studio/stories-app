@@ -481,7 +481,8 @@ class WidgetApp {
 
             this.mediaRecorder.stop();
 
-            // Don't stop timer yet - it will freeze during transcribing state
+            // Stop timer immediately — user pressed Stop, timer should freeze
+            this.stopTimer();
 
             // Clear recording source
             this.recordingSource = null;
@@ -794,7 +795,8 @@ class WidgetApp {
 
     startTimer() {
         this.startTime = Date.now();
-        
+        this.timerDisplay.textContent = '00:00';
+
         this.timerInterval = setInterval(() => {
             const elapsed = Date.now() - this.startTime;
             const totalSeconds = Math.floor(elapsed / 1000);
@@ -839,11 +841,9 @@ class WidgetApp {
             this.timerInterval = null;
         }
         
-        // Reset timer color to default (white)
+        // Reset timer color and display to default
         this.timerDisplay.classList.remove('long-recording', 'max-time-warning');
-        
-        // DON'T reset timer text - keep it frozen at current time
-        // this.timerDisplay.textContent = '00:00';
+        this.timerDisplay.textContent = '00:00';
     }
 
     // ====================================
