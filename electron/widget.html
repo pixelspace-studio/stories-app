@@ -335,6 +335,16 @@
             50% { transform: scale(1.1); }
             100% { transform: scale(1); }
         }
+
+        /* Instant recording mode: kill all decorative transitions */
+        .instant-mode .widget-container,
+        .instant-mode .record-button,
+        .instant-mode .record-button i,
+        .instant-mode .widget-controls,
+        .instant-mode .timer,
+        .instant-mode .cancel-button {
+            transition: none !important;
+        }
     </style>
 </head>
         <body>

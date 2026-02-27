@@ -334,6 +334,7 @@ class VoiceToTextApp {
         this.soundEffectsToggle = document.getElementById('soundEffectsToggle');
         this.autoHideWidgetToggle = document.getElementById('autoHideWidgetToggle');
         this.autoPasteToggle = document.getElementById('autoPasteToggle');
+        this.instantRecordingToggle = document.getElementById('instantRecordingToggle');
         this.telemetryToggle = document.getElementById('telemetryToggle');
         this.fluidTranscriptionToggle = document.getElementById('fluidTranscriptionToggle');
         this.privacyPolicyLink = document.getElementById('privacyPolicyLink');
@@ -781,7 +782,13 @@ class VoiceToTextApp {
                 this.toggleAutoPaste();
             });
         }
-        
+
+        if (this.instantRecordingToggle) {
+            this.instantRecordingToggle.addEventListener('change', () => {
+                this.toggleInstantRecording();
+            });
+        }
+
         // Sound Effects toggle
         if (this.soundEffectsToggle) {
             this.soundEffectsToggle.addEventListener('change', () => {
@@ -2207,7 +2214,10 @@ class VoiceToTextApp {
         
         // Load auto-paste setting
         await this.loadAutoPasteSetting();
-        
+
+        // Load instant recording setting
+        await this.loadInstantRecordingSetting();
+
         // Load sound effects setting
         await this.loadSoundEffectsSetting();
         
@@ -3011,6 +3021,11 @@ class VoiceToTextApp {
                 if (window.electronAPI && window.electronAPI.syncRecordingState) {
                     await window.electronAPI.syncRecordingState('api_key_added');
                 }
+
+                // Update cached API key status in main process
+                if (window.electronAPI && window.electronAPI.updateApiKeyCache) {
+                    window.electronAPI.updateApiKeyCache(true);
+                }
                 
                 // Refresh empty state message
                 this.loadTranscriptionHistory();
@@ -3076,6 +3091,11 @@ class VoiceToTextApp {
                 // Notify widget about API key removal
                 if (window.electronAPI && window.electronAPI.syncRecordingState) {
                     await window.electronAPI.syncRecordingState('api_key_removed');
+                }
+
+                // Update cached API key status in main process
+                if (window.electronAPI && window.electronAPI.updateApiKeyCache) {
+                    window.electronAPI.updateApiKeyCache(false);
                 }
                 
                 // Refresh empty state message
@@ -3303,6 +3323,62 @@ class VoiceToTextApp {
             console.error('❌ Error updating auto-paste preference:', error);
             // Revert toggle on error
             this.autoPasteToggle.checked = !isEnabled;
+        }
+    }
+
+    // Instant Recording Toggle Method
+    async toggleInstantRecording() {
+        const isEnabled = this.instantRecordingToggle.checked;
+        console.log('⚡ Instant recording:', isEnabled ? 'Enabled' : 'Disabled');
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.instant_recording`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: isEnabled })
+            });
+
+            if (response.ok) {
+                console.log('✅ Instant recording preference updated');
+
+                await this.telemetry.track('feature_toggled', {
+                    feature: 'instant_recording',
+                    enabled: isEnabled,
+                    platform: await this.getPlatform()
+                });
+
+                // Notify Electron main process
+                if (window.electronAPI && window.electronAPI.setInstantRecording) {
+                    window.electronAPI.setInstantRecording(isEnabled);
+                }
+            } else {
+                console.error('❌ Failed to update instant recording preference');
+                this.instantRecordingToggle.checked = !isEnabled;
+            }
+        } catch (error) {
+            console.error('❌ Error updating instant recording preference:', error);
+            this.instantRecordingToggle.checked = !isEnabled;
+        }
+    }
+
+    // Load instant recording setting
+    async loadInstantRecordingSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.instant_recording`);
+            if (response.ok) {
+                const data = await response.json();
+                const isEnabled = data.value || false;
+                console.log('⚡ Current instant recording setting:', isEnabled);
+                this.instantRecordingToggle.checked = isEnabled;
+
+                // Notify Electron main process of current value
+                if (window.electronAPI && window.electronAPI.setInstantRecording) {
+                    window.electronAPI.setInstantRecording(isEnabled);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading instant recording setting:', error);
+            this.instantRecordingToggle.checked = false;
         }
     }
 

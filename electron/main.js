@@ -1128,38 +1128,44 @@ async function toggleRecording() {
   console.log('🎤 Toggle recording:', isRecording ? 'STOP' : 'START');
   
   // Check if API key is configured (only when starting recording)
+  // Use cached value to avoid blocking HTTP call on every toggle
   if (!isRecording) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.has_api_key) {
-          console.warn('⚠️ Cannot start recording: No API Key configured');
-          
-          // Show notification
-          new Notification({
-            title: 'Stories - API Key Required',
-            body: 'Please add your OpenAI API Key in Settings before recording.',
-            silent: false
-          }).show();
-          
-          // Try to focus main window and show alert
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) {
-              mainWindow.restore();
-            }
-            mainWindow.focus();
-            
-            // Send message to main window to show alert
-            mainWindow.webContents.send('sync-recording-state-broadcast', 'api_key_required');
-          }
-          
-          return; // Abort recording
+    if (!cachedHasApiKey) {
+      // Double-check with backend in case cache is stale
+      try {
+        const response = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
+        if (response.ok) {
+          const data = await response.json();
+          cachedHasApiKey = data.has_api_key || false;
         }
+      } catch (error) {
+        console.error('❌ Error checking API key status:', error);
+        // Continue anyway (backend might be starting up)
       }
-    } catch (error) {
-      console.error('❌ Error checking API key status:', error);
-      // Continue anyway (backend might be starting up)
+    }
+
+    if (!cachedHasApiKey) {
+      console.warn('⚠️ Cannot start recording: No API Key configured');
+
+      // Show notification
+      new Notification({
+        title: 'Stories - API Key Required',
+        body: 'Please add your OpenAI API Key in Settings before recording.',
+        silent: false
+      }).show();
+
+      // Try to focus main window and show alert
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.focus();
+
+        // Send message to main window to show alert
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'api_key_required');
+      }
+
+      return; // Abort recording
     }
   }
   
@@ -1167,9 +1173,10 @@ async function toggleRecording() {
   // This ensures auto-paste goes to the most recent app, not the initial one
   let wasInStoriesApp = false; // Track if user was already in Stories
   
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && autoPasteEnabled) {
     // Capture active app (for auto-paste detection)
-    
+    // Skip entirely when auto-paste is disabled — saves 300-500ms
+
     const { exec } = require('child_process');
     const script = `
       tell application "System Events"
@@ -1478,6 +1485,8 @@ async function loadStartupConfiguration() {
   const config = {
     autoHideWidget: false,
     autoPaste: false,
+    instantRecording: false,
+    hasApiKey: false,
     recordShortcut: 'CommandOrControl+Shift+R'
   };
   
@@ -1503,6 +1512,28 @@ async function loadStartupConfiguration() {
     console.warn('⚠️ Could not load auto-paste setting:', error.message);
   }
   
+  try {
+    // Load instant recording setting
+    const instantResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/settings/ui_settings.instant_recording`);
+    if (instantResponse.ok) {
+      const data = await instantResponse.json();
+      config.instantRecording = data.value || false;
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not load instant recording setting:', error.message);
+  }
+
+  try {
+    // Cache API key status at startup to avoid HTTP check on every recording toggle
+    const apiKeyResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
+    if (apiKeyResponse.ok) {
+      const data = await apiKeyResponse.json();
+      config.hasApiKey = data.has_api_key || false;
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not load API key status:', error.message);
+  }
+
   try {
     // Load record shortcut
     const shortcutResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/settings/shortcuts.record_toggle`);
@@ -1597,6 +1628,8 @@ app.whenReady().then(async () => {
     const config = await loadStartupConfiguration();
     autoHideWidgetEnabled = config.autoHideWidget;
     autoPasteEnabled = config.autoPaste || false;
+    instantRecordingEnabled = config.instantRecording || false;
+    cachedHasApiKey = config.hasApiKey || false;
     
     // Setup dock (macOS)
     if (process.platform === 'darwin') {
@@ -1925,6 +1958,12 @@ let widgetHideTimeout = null;
 // Auto-paste setting
 let autoPasteEnabled = false;
 
+// Instant recording setting (skip animations & defer non-critical work)
+let instantRecordingEnabled = false;
+
+// Cached API key status (avoid HTTP check on every recording toggle)
+let cachedHasApiKey = false;
+
 ipcMain.handle('set-auto-hide-widget', async (event, isEnabled) => {
   try {
     // CRITICAL: Only update widget visibility if setting ACTUALLY CHANGED
@@ -1966,6 +2005,27 @@ ipcMain.handle('set-auto-paste', async (event, isEnabled) => {
     console.error('Error setting auto-paste:', error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('set-instant-recording', async (event, isEnabled) => {
+  try {
+    instantRecordingEnabled = isEnabled;
+    console.log(`⚡ Instant recording setting: ${isEnabled ? 'Enabled' : 'Disabled'}`);
+    // Notify widget to update its animation mode
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('instant-recording-changed', isEnabled);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting instant recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-api-key-cache', async (event, hasKey) => {
+  cachedHasApiKey = hasKey;
+  console.log(`🔑 API key cache updated: ${hasKey}`);
+  return { success: true };
 });
 
 ipcMain.handle('request-widget-hide', async (event) => {

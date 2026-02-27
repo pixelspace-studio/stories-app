@@ -42,6 +42,9 @@ class WidgetApp {
         this.isFluidEnabled = false;
         this._fluidStopping = false; // Guard flag for onstop handler
 
+        // Instant recording mode (skip animations for faster start)
+        this.instantMode = false;
+
         this.init();
         this.setupRecordingConfig(); // Listen for config from main process
     }
@@ -98,9 +101,16 @@ class WidgetApp {
         // Set up shortcut listener
         this.setupShortcutListener();
         
+        // Listen for instant recording setting changes from main process
+        if (window.electronAPI && window.electronAPI.onInstantRecordingChanged) {
+            window.electronAPI.onInstantRecordingChanged((event, isEnabled) => {
+                this.setInstantMode(isEnabled);
+            });
+        }
+
         // Initialize backend URL with dynamic port
         this.initBackendUrl();
-        
+
         // Start button state polling
         this.startButtonStatePolling();
         
@@ -153,6 +163,9 @@ class WidgetApp {
 
         // Load fluid transcription setting
         this.loadFluidTranscriptionSetting();
+
+        // Load instant recording setting
+        this.loadInstantRecordingSetting();
 
         // Now check backend connection
         this.checkBackendConnection();
@@ -239,6 +252,23 @@ class WidgetApp {
 
     async startRecording() {
         try {
+            // Instant mode: pre-expand widget BEFORE anything else
+            // so it's already in recording layout when it becomes visible
+            if (this.instantMode) {
+                this.widgetContainer.classList.remove('compact');
+                this.widgetContainer.classList.add('expanded');
+                this.recordButton.classList.remove('inactive', 'processing');
+                this.recordButton.classList.add('recording');
+                this.recordButton.innerHTML = '<div class="stop-square"></div>';
+                this.recordButton.style.opacity = '1';
+                this.cancelButton.disabled = false;
+                this.cancelButton.style.opacity = '1';
+                this.timerDisplay.style.opacity = '1';
+                if (window.electronAPI && window.electronAPI.resizeWidget) {
+                    window.electronAPI.resizeWidget(130, 40); // fire-and-forget, no await
+                }
+            }
+
             // Safety timeout: auto force-stop after MAX_RECORDING_MINUTES
             const maxTimeMs = this.MAX_RECORDING_MINUTES * 60 * 1000;
             this.safetyTimeout = setTimeout(() => {
@@ -323,7 +353,10 @@ class WidgetApp {
     async startWebRecording() {
         try {
             // Refresh fluid setting from backend before each recording
-            await this.loadFluidTranscriptionSetting();
+            // Skip in instant mode — use cached value from startup/settings change
+            if (!this.instantMode) {
+                await this.loadFluidTranscriptionSetting();
+            }
 
             console.log('🎛️ Requesting microphone access...');
 
@@ -850,6 +883,28 @@ class WidgetApp {
     // FLUID TRANSCRIPTION
     // ====================================
 
+    setInstantMode(isEnabled) {
+        this.instantMode = isEnabled;
+        if (isEnabled) {
+            document.body.classList.add('instant-mode');
+        } else {
+            document.body.classList.remove('instant-mode');
+        }
+        console.log(`⚡ Widget instant mode: ${isEnabled ? 'ON' : 'OFF'}`);
+    }
+
+    async loadInstantRecordingSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.instant_recording`);
+            if (response.ok) {
+                const data = await response.json();
+                this.setInstantMode(data.value || false);
+            }
+        } catch (error) {
+            console.error('❌ Widget: Error loading instant recording setting:', error);
+        }
+    }
+
     async loadFluidTranscriptionSetting() {
         try {
             const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.fluid_transcription`);
@@ -1205,24 +1260,31 @@ class WidgetApp {
     async showInactiveState() {
         // Signal that transcription is complete (accelerate progress to 95%)
         this.transcriptionCompleted = true;
-        
+
         // DON'T stop the progress interval here
         // Let it finish naturally and reach 95%, then it will stop itself
-        
-        // Change button content smoothly
-        await this.updateButtonContent('<i class="ph ph-microphone"></i>');
-        
-        // Button styling
-        this.recordButton.style.removeProperty('background-color');
-        this.recordButton.classList.remove('recording', 'processing');
-        this.recordButton.classList.add('inactive');
-        
-        // Fade out cancel button and timer (CSS handles the transition)
-        this.cancelButton.style.opacity = '0';
-        this.timerDisplay.style.opacity = '0';
-        
-        // Wait for fade out (100ms matches transition)
-        await new Promise(resolve => setTimeout(resolve, 100));
+
+        if (this.instantMode) {
+            // Instant mode: snap to inactive immediately, no fade delays
+            this.recordButton.innerHTML = '<i class="ph ph-microphone"></i>';
+            this.recordButton.style.opacity = '1';
+            this.recordButton.style.removeProperty('background-color');
+            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.add('inactive');
+            this.cancelButton.style.opacity = '0';
+            this.timerDisplay.style.opacity = '0';
+        } else {
+            // Normal mode: smooth transitions
+            await this.updateButtonContent('<i class="ph ph-microphone"></i>');
+            this.recordButton.style.removeProperty('background-color');
+            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.add('inactive');
+            this.cancelButton.style.opacity = '0';
+            this.timerDisplay.style.opacity = '0';
+
+            // Wait for fade out (100ms matches transition)
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
         
         // Compact widget - 48x48 (32x32 button + 8px padding)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
@@ -1275,22 +1337,27 @@ class WidgetApp {
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             await window.electronAPI.resizeWidget(130, 40);
         }
-        
+
         this.widgetContainer.classList.remove('compact');
         this.widgetContainer.classList.add('expanded');
-        
-        // Cancel button active (CSS handles visibility with fade)
+
+        // Cancel button active
         this.cancelButton.disabled = false;
         this.cancelButton.style.opacity = '1';
         this.timerDisplay.style.opacity = '1';
-        
-        // Change to recording class BEFORE content change for smooth color transition
+
         this.recordButton.classList.remove('inactive', 'processing');
         this.recordButton.classList.add('recording');
         this.recordButton.style.removeProperty('background-color');
-        
-        // Button shows stop square (content fade happens after color change)
-        await this.updateButtonContent('<div class="stop-square"></div>');
+
+        if (this.instantMode) {
+            // Instant mode: set content directly, no fade
+            this.recordButton.innerHTML = '<div class="stop-square"></div>';
+            this.recordButton.style.opacity = '1';
+        } else {
+            // Normal mode: smooth content fade
+            await this.updateButtonContent('<div class="stop-square"></div>');
+        }
     }
 
     async showRecordingActiveState() {
@@ -1507,12 +1574,12 @@ class WidgetApp {
         // Check if content is already the same to avoid unnecessary animation
         const currentContent = this.recordButton.innerHTML.trim();
         const newContentTrimmed = newContent.trim();
-        
+
         if (currentContent === newContentTrimmed) {
             return; // No change needed
         }
-        
-        if (skipAnimation) {
+
+        if (skipAnimation || this.instantMode) {
             // Direct change without animation
             this.recordButton.innerHTML = newContent;
             this.recordButton.style.opacity = '1';
