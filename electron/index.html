@@ -90,6 +90,14 @@
                 <button id="loadMoreButton" class="load-more-button hidden">
                     View all
                 </button>
+
+                <!-- Transcription History Management -->
+                <div id="transcriptionStatsSection" class="audio-storage-section hidden">
+                    <span id="transcriptionStatsText" class="storage-stats-text"></span>
+                    <button class="icon-button-delete" id="clearHistoryButton" title="Clear all transcriptions">
+                        <i class="ph ph-trash"></i>
+                    </button>
+                </div>
             </div>
         </main>
     </div>
@@ -122,6 +130,38 @@
                     </div>
                 </div>
                 
+                <!-- Instant Recording Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Instant recording</span>
+                            <span class="setting-tooltip" title="Skip animations for faster recording">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="instantRecordingToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Fluid Transcription Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Fluid transcription</span>
+                            <span class="setting-tooltip" title="Transcribe in real-time while recording for faster results">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="fluidTranscriptionToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Auto-hide Widget Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -137,7 +177,7 @@
                         </label>
                     </div>
                 </div>
-                
+
                 <!-- Auto-paste Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -149,22 +189,6 @@
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="autoPasteToggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                </div>
-                
-                <!-- Instant Recording Toggle -->
-                <div class="setting-item">
-                    <div class="setting-row">
-                        <div class="setting-label-group">
-                            <span class="setting-label">Instant recording</span>
-                            <span class="setting-tooltip" title="Skip animations and cache settings for faster recording start">
-                                <i class="ph ph-info"></i>
-                            </span>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="instantRecordingToggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -185,7 +209,7 @@
                         </label>
                     </div>
                 </div>
-                
+
                 <!-- Save Audio Toggle -->
                 <div class="setting-item setting-item-vertical">
                     <div class="setting-row">
@@ -195,7 +219,7 @@
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    
+
             <!-- Audio Storage Management (Only visible when Save Audio is enabled AND has files) -->
             <div id="audioStorageSection" class="audio-storage-section hidden">
                 <button class="icon-button-neutral hidden" id="openAudioFolderButton" title="Open Audio Folder">
@@ -207,22 +231,6 @@
                     <i class="ph ph-trash"></i>
                 </button>
             </div>
-                </div>
-                
-                <!-- Fluid Transcription Toggle -->
-                <div class="setting-item">
-                    <div class="setting-row">
-                        <div class="setting-label-group">
-                            <span class="setting-label">Fluid transcription</span>
-                            <span class="setting-tooltip" title="Transcribe in real-time while recording for faster results">
-                                <i class="ph ph-info"></i>
-                            </span>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="fluidTranscriptionToggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
                 </div>
 
                 <!-- Telemetry Toggle (only shown in internal builds) -->
@@ -321,6 +329,20 @@
         </div>
     </div>
     
+    <!-- Clear Transcription History Confirmation Modal -->
+    <div id="clearHistoryModal" class="modal-overlay hidden">
+        <div class="api-modal confirmation-modal">
+            <button class="modal-close" id="closeClearHistoryModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Clear All Transcriptions?</h3>
+            <p class="modal-description">This will permanently delete all transcription history. This action cannot be undone.</p>
+            <button class="modal-submit-danger" id="confirmClearHistory">
+                Clear All Transcriptions
+            </button>
+        </div>
+    </div>
+
     <!-- Add/Edit Word Modal -->
     <div id="wordModal" class="modal-overlay hidden">
         <div class="api-modal">

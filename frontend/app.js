@@ -283,6 +283,9 @@ class VoiceToTextApp {
         
         // Register Clear Audio Confirmation
         this.modalManager.register('clear-audio-modal', this.clearAudioModal, null);
+
+        // Register Clear History Confirmation
+        this.modalManager.register('clear-history-modal', this.clearHistoryModal, null);
         
         // Register Alert Modal
         this.modalManager.register('alert-modal', this.alertModal, null);
@@ -383,6 +386,14 @@ class VoiceToTextApp {
         this.clearAudioModal = document.getElementById('clearAudioModal');
         this.closeClearAudioModal = document.getElementById('closeClearAudioModal');
         this.confirmClearAudio = document.getElementById('confirmClearAudio');
+
+        // Clear Transcription History
+        this.transcriptionStatsSection = document.getElementById('transcriptionStatsSection');
+        this.transcriptionStatsText = document.getElementById('transcriptionStatsText');
+        this.clearHistoryButton = document.getElementById('clearHistoryButton');
+        this.clearHistoryModal = document.getElementById('clearHistoryModal');
+        this.closeClearHistoryModal = document.getElementById('closeClearHistoryModal');
+        this.confirmClearHistory = document.getElementById('confirmClearHistory');
         
         // Alert Modal
         this.alertModal = document.getElementById('alertModal');
@@ -841,6 +852,35 @@ class VoiceToTextApp {
             this.clearAudioModal.addEventListener('click', (e) => {
                 if (e.target === this.clearAudioModal) {
                     this.closeClearAudioModalHandler();
+                }
+            });
+        }
+
+        // Clear History button
+        if (this.clearHistoryButton) {
+            this.clearHistoryButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.openClearHistoryModal();
+            });
+        }
+
+        // Clear History Modal listeners
+        if (this.closeClearHistoryModal) {
+            this.closeClearHistoryModal.addEventListener('click', () => {
+                this.closeClearHistoryModalHandler();
+            });
+        }
+
+        if (this.confirmClearHistory) {
+            this.confirmClearHistory.addEventListener('click', () => {
+                this.clearAllTranscriptions();
+            });
+        }
+
+        if (this.clearHistoryModal) {
+            this.clearHistoryModal.addEventListener('click', (e) => {
+                if (e.target === this.clearHistoryModal) {
+                    this.closeClearHistoryModalHandler();
                 }
             });
         }
@@ -1418,12 +1458,15 @@ class VoiceToTextApp {
             
             if (data && data.transcriptions) {
                 this.renderTranscriptions(data.transcriptions);
+                this.updateTranscriptionStats(data.transcriptions.length);
             } else {
                 this.renderTranscriptions([]);
+                this.updateTranscriptionStats(0);
             }
         } catch (error) {
             console.error('Error loading history:', error);
             this.renderTranscriptions([]);
+            this.updateTranscriptionStats(0);
         }
     }
 
@@ -3075,7 +3118,66 @@ class VoiceToTextApp {
             this.clearAudioModal.classList.add('hidden');
         }, 200);
     }
-    
+
+    openClearHistoryModal() {
+        console.log('🗑️ Opening Clear History confirmation modal');
+        this.clearHistoryModal.classList.remove('hidden');
+        setTimeout(() => {
+            this.clearHistoryModal.classList.add('show');
+        }, 10);
+    }
+
+    closeClearHistoryModalHandler() {
+        console.log('🗑️ Closing Clear History confirmation modal');
+        this.clearHistoryModal.classList.remove('show');
+        setTimeout(() => {
+            this.clearHistoryModal.classList.add('hidden');
+        }, 200);
+    }
+
+    async clearAllTranscriptions() {
+        this.closeClearHistoryModalHandler();
+
+        this.clearHistoryButton.disabled = true;
+        this.clearHistoryButton.style.opacity = '0.5';
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/history`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const deletedCount = data.deleted_count || 0;
+
+                console.log('✅ Transcription history cleared:', data);
+                this.showToast(`Deleted ${deletedCount} transcription${deletedCount !== 1 ? 's' : ''}`);
+
+                this.loadTranscriptionHistory();
+            } else {
+                console.error('❌ Failed to clear transcription history');
+                this.showToast('Failed to clear history', 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error clearing transcription history:', error);
+            this.showToast('Error clearing history', 'error');
+        } finally {
+            this.clearHistoryButton.disabled = false;
+            this.clearHistoryButton.style.opacity = '1';
+        }
+    }
+
+    updateTranscriptionStats(count) {
+        if (!this.transcriptionStatsSection) return;
+
+        if (count > 0) {
+            this.transcriptionStatsSection.classList.remove('hidden');
+            this.transcriptionStatsText.textContent = `${count} transcription${count !== 1 ? 's' : ''}`;
+        } else {
+            this.transcriptionStatsSection.classList.add('hidden');
+        }
+    }
+
     async removeApiKey() {
         try {
             console.log('🗑️ Removing API Key...');

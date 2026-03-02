@@ -894,6 +894,20 @@ def delete_transcription(transcription_id):
     
     return affected_rows > 0
 
+def delete_all_transcriptions():
+    """Delete all transcriptions and return the count of deleted rows"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('DELETE FROM transcriptions')
+
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+
+    logger.info(f"🗑️ Deleted all transcriptions ({deleted_count} rows)")
+    return deleted_count
+
 def get_transcription_by_audio_id(audio_id):
     """Get a transcription by its audio_id
     
@@ -971,6 +985,23 @@ def get_history():
     except Exception as e:
         return jsonify({
             "error": "Failed to fetch history",
+            "details": str(e)
+        }), 500
+
+@app.route('/api/history', methods=['DELETE'])
+def delete_all_history():
+    """Delete all transcription history"""
+    try:
+        deleted_count = delete_all_transcriptions()
+        logger.info(f"✅ Clear history completed: {deleted_count} transcription(s) removed")
+        return jsonify({
+            "message": f"Deleted {deleted_count} transcription{'s' if deleted_count != 1 else ''}",
+            "deleted_count": deleted_count
+        })
+    except Exception as e:
+        logger.error(f"❌ Failed to clear transcription history: {e}")
+        return jsonify({
+            "error": "Failed to delete transcription history",
             "details": str(e)
         }), 500
 
@@ -1968,17 +1999,20 @@ def update_setting(setting_key):
         success = config_manager.set_setting(setting_key, data['value'])
         
         if success:
+            logger.info(f"⚙️ Setting updated: {setting_key} = {data['value']}")
             return jsonify({
                 "message": f"Setting '{setting_key}' updated successfully",
                 "key": setting_key,
                 "value": data['value']
             })
         else:
+            logger.error(f"❌ Failed to update setting: {setting_key}")
             return jsonify({
                 "error": f"Failed to update setting '{setting_key}'"
             }), 500
-            
+
     except Exception as e:
+        logger.error(f"❌ Error updating setting {setting_key}: {e}")
         return jsonify({
             "error": "Failed to update setting",
             "details": str(e)
@@ -2336,6 +2370,7 @@ if __name__ == '__main__':
     print("   - POST /api/transcribe")
     print("   - POST /api/transcribe/retry")
     print("   - GET  /api/history")
+    print("   - DELETE /api/history")
     print("   - DELETE /api/history/<id>")
     print("   - GET  /api/audio/list")
     print("   - GET  /api/audio/<id>")
