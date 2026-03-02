@@ -2096,11 +2096,16 @@ ipcMain.handle('request-widget-hide', async (event) => {
         }
       };
       
-      // Start checking after 1 second delay
-      widgetHideTimeout = setTimeout(() => {
+      if (instantRecordingEnabled) {
+        // Instant mode: hide immediately, no delay
         waitForInactiveAndHide();
-        widgetHideTimeout = null;
-      }, 1000);
+      } else {
+        // Normal mode: start checking after 1 second delay
+        widgetHideTimeout = setTimeout(() => {
+          waitForInactiveAndHide();
+          widgetHideTimeout = null;
+        }, 1000);
+      }
     }
     
     return { success: true };
