@@ -2301,6 +2301,22 @@ async function detectCurrentApp() {
       });
 }
 
+/**
+ * Promisified child_process.exec for clean async/await usage
+ */
+function execPromise(command) {
+  const { exec } = require('child_process');
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
+
 // ============================================================================
 // AUTO-PASTE HANDLER
 // ============================================================================
@@ -2309,7 +2325,7 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
   try {
     // Copy to clipboard first
     clipboard.writeText(text);
-    
+
     // Check if auto-paste is enabled
     if (!autoPasteEnabled) {
       console.log('📋 Auto-paste skipped (disabled by user)');
@@ -2320,7 +2336,24 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'Auto-paste disabled' };
     }
-    
+
+    // ========================================================================
+    // FAIL FAST: Check Accessibility BEFORE doing anything else
+    // ========================================================================
+    if (process.platform === 'darwin') {
+      const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
+      if (!hasAccessibility) {
+        console.error('❌ Auto-paste blocked: Missing Accessibility permission');
+        console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
+        new Notification({
+          title: 'Stories - Accessibility Required',
+          body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
+          silent: false
+        }).show();
+        return { success: false, reason: 'Missing Accessibility permission' };
+      }
+    }
+
     // ========================================================================
     // PRIORITY-BASED TARGET APP DETECTION
     // ========================================================================
@@ -2331,26 +2364,37 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
     // PRIORITY 3: Clipboard notification (no valid app found)
     //             → Fallback when user is in Stories or no app detected
     // ========================================================================
-    
+
     let targetApp = null;
-    
+
     // PRIORITY 1: Detect CURRENT app (in real-time)
     const currentApp = await detectCurrentApp();
-    
+
     if (isValidApp(currentApp)) {
       targetApp = currentApp;
     } else {
-      // PRIORITY 2: Use CAPTURED app (from toggleRecording)
-      // If lastActiveApp is Stories, wait for async fallback to complete
-      if (lastActiveApp === 'Stories' || lastActiveApp === 'Electron' || lastActiveApp === 'stories') {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-      }
-      
+      // PRIORITY 2: Use CAPTURED app (from toggleRecording or async fallback)
       if (isValidApp(lastActiveApp)) {
         targetApp = lastActiveApp;
+      } else {
+        // Retry detection with short delays — catches cases where the app
+        // behind the widget hasn't become frontmost yet
+        const retryDelays = [300, 600, 900];
+        for (const retryDelay of retryDelays) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          const retryApp = await detectCurrentApp();
+          if (isValidApp(retryApp)) {
+            targetApp = retryApp;
+            break;
+          }
+          if (isValidApp(lastActiveApp)) {
+            targetApp = lastActiveApp;
+            break;
+          }
+        }
       }
     }
-    
+
     // PRIORITY 3: Clipboard notification (no valid target)
     if (!targetApp) {
       new Notification({
@@ -2360,95 +2404,76 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'No target app detected' };
     }
-    
-    // Execute auto-paste
-    if (process.platform === 'darwin') {
-      const { exec } = require('child_process');
-      
-      // Determine delay based on app type
-      const electronApps = ['Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion'];
-      const isElectronApp = electronApps.some(app => targetApp.includes(app));
-      const activationDelay = isElectronApp ? 1000 : 500; // milliseconds
-      
-      try {
-        // Step 1: Activate target app using AppleScript
-        const activateScript = `tell application "${targetApp}" to activate`;
-        
-        exec(`osascript -e '${activateScript}'`, (activateError, activateStdout, activateStderr) => {
-          if (activateError) {
-            new Notification({
-              title: 'Stories',
-              body: 'Text copied to clipboard',
-              silent: true
-            }).show();
-            return;
-          }
-          
-          // Step 2: Wait for app to be ready, then paste
-          setTimeout(() => {
-            // CRITICAL: Verify Accessibility permissions BEFORE attempting paste
-            const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
-            
-            if (!hasAccessibility) {
-              console.error('❌ Auto-paste blocked: Missing Accessibility permission');
-              console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
-              console.error('   If permission shown but not working: Close Stories, run "tccutil reset Accessibility com.pixelspace.stories", restart Mac');
-              
-              new Notification({
-                title: 'Stories - Accessibility Required',
-                body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
-                silent: false
-              }).show();
-              
-              return;
-            }
-            
-            try {
-              // Verify robotjs is loaded
-              if (!robot || typeof robot.keyTap !== 'function') {
-                throw new Error('robotjs module not loaded correctly');
-              }
-              
-              // Execute auto-paste
-              robot.keyTap('v', 'command');
-              console.log('✅ Auto-paste SUCCESS →', targetApp, `(${text.length} chars)`);
-              
-            } catch (robotError) {
-              console.error('❌ Auto-paste failed:', robotError.message);
-              
-          new Notification({
-            title: 'Stories',
-                body: 'Text copied to clipboard - press Cmd+V to paste',
-            silent: true
-          }).show();
-            }
-          }, activationDelay);
-        });
-        
-      } catch (error) {
-        console.error('❌ Auto-paste setup error:', error.message);
-        
-        new Notification({
-          title: 'Stories',
-          body: 'Text copied to clipboard',
-          silent: true
-        }).show();
-      }
-      
-    } else {
+
+    // ========================================================================
+    // SINGLE APPLESCRIPT: activate + delay + keystroke (atomic)
+    // ========================================================================
+    if (process.platform !== 'darwin') {
       console.log('⚠️ Auto-paste not supported on this platform');
       new Notification({
         title: 'Stories',
         body: 'Text copied - press Cmd+V to paste',
         silent: true
       }).show();
+      return { success: false, reason: 'Platform not supported' };
     }
-    
-    return { success: true };
+
+    // Determine delay based on app type — Electron apps need longer to accept focus
+    const electronApps = [
+      'Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion',
+      'Figma', 'Obsidian', 'WhatsApp', 'Telegram', '1Password', 'Postman',
+      'Spotify', 'Teams', 'WebStorm', 'IntelliJ IDEA',
+    ];
+    const isElectronApp = electronApps.some(app => targetApp.includes(app));
+    const delay = isElectronApp ? 1.2 : 0.5;
+
+    // Escape double quotes in app name to prevent AppleScript injection
+    const safeAppName = targetApp.replace(/"/g, '\\"');
+
+    const pasteScript = `
+      tell application "${safeAppName}" to activate
+      delay ${delay}
+      tell application "System Events"
+        keystroke "v" using command down
+      end tell
+    `;
+
+    try {
+      await execPromise(`osascript -e '${pasteScript}'`);
+    } catch (pasteError) {
+      console.error('❌ Auto-paste AppleScript failed:', pasteError.message);
+      new Notification({
+        title: 'Stories',
+        body: 'Text copied to clipboard - press Cmd+V to paste',
+        silent: true
+      }).show();
+      return { success: false, reason: 'AppleScript failed', error: pasteError.message };
+    }
+
+    // ========================================================================
+    // VERIFICATION + RETRY: confirm focus wasn't stolen
+    // ========================================================================
+    const appAfterPaste = await detectCurrentApp();
+
+    if (appAfterPaste && appAfterPaste !== targetApp) {
+      try {
+        await execPromise(`osascript -e '${pasteScript}'`);
+      } catch (retryError) {
+        console.error('❌ Auto-paste retry failed:', retryError.message);
+        new Notification({
+          title: 'Stories',
+          body: 'Text copied to clipboard - press Cmd+V to paste',
+          silent: true
+        }).show();
+        return { success: false, reason: 'Retry failed', error: retryError.message };
+      }
+    }
+
+    console.log(`✅ Auto-paste SUCCESS → "${targetApp}" (${text.length} chars)`);
+    return { success: true, targetApp };
   } catch (error) {
     console.error('❌ Auto-paste error:', error.message);
     console.error('   Stack trace:', error.stack);
-    console.log('================================================================================');
     return { success: false, error: error.message };
   }
 });
