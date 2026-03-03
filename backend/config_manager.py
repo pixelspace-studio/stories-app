@@ -58,7 +58,8 @@ class ConfigurationManager:
                 'save_audio_files': True,
                 'cleanup_days': 30,
                 'keep_failed_files': True,
-                'max_file_size_mb': 25
+                'max_file_size_mb': 25,
+                'preferred_microphone': 'default'
             },
             'ui_settings': {
                 'theme': 'system',
@@ -67,7 +68,8 @@ class ConfigurationManager:
                 'always_on_top': False,
                 'auto_hide_widget': False,
                 'auto_paste': False,
-                'sound_effects_enabled': False
+                'sound_effects_enabled': False,
+                'fluid_transcription': False
             },
             'shortcuts': {
                 'record_toggle': 'CommandOrControl+Shift+R',

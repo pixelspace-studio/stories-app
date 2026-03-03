@@ -36,7 +36,15 @@ class WidgetApp {
         
         // Telemetry client
         this.telemetry = new TelemetryClient();
-        
+
+        // Fluid Transcription
+        this.fluidTranscription = null;
+        this.isFluidEnabled = false;
+        this._fluidStopping = false; // Guard flag for onstop handler
+
+        // Instant recording mode (skip animations for faster start)
+        this.instantMode = false;
+
         this.init();
         this.setupRecordingConfig(); // Listen for config from main process
     }
@@ -93,9 +101,16 @@ class WidgetApp {
         // Set up shortcut listener
         this.setupShortcutListener();
         
+        // Listen for instant recording setting changes from main process
+        if (window.electronAPI && window.electronAPI.onInstantRecordingChanged) {
+            window.electronAPI.onInstantRecordingChanged((event, isEnabled) => {
+                this.setInstantMode(isEnabled);
+            });
+        }
+
         // Initialize backend URL with dynamic port
         this.initBackendUrl();
-        
+
         // Start button state polling
         this.startButtonStatePolling();
         
@@ -142,7 +157,16 @@ class WidgetApp {
                 console.warn('⚠️ Widget: Could not get backend port, using default:', this.backendUrl);
             }
         }
-        
+
+        // Initialize FluidTranscriptionManager
+        this.fluidTranscription = new FluidTranscriptionManager(null, this.backendUrl);
+
+        // Load fluid transcription setting
+        this.loadFluidTranscriptionSetting();
+
+        // Load instant recording setting
+        this.loadInstantRecordingSetting();
+
         // Now check backend connection
         this.checkBackendConnection();
     }
@@ -228,6 +252,23 @@ class WidgetApp {
 
     async startRecording() {
         try {
+            // Instant mode: pre-expand widget BEFORE anything else
+            // so it's already in recording layout when it becomes visible
+            if (this.instantMode) {
+                this.widgetContainer.classList.remove('compact');
+                this.widgetContainer.classList.add('expanded');
+                this.recordButton.classList.remove('inactive', 'processing');
+                this.recordButton.classList.add('recording');
+                this.recordButton.innerHTML = '<div class="stop-square"></div>';
+                this.recordButton.style.opacity = '1';
+                this.cancelButton.disabled = false;
+                this.cancelButton.style.opacity = '1';
+                this.timerDisplay.style.opacity = '1';
+                if (window.electronAPI && window.electronAPI.resizeWidget) {
+                    window.electronAPI.resizeWidget(130, 40); // fire-and-forget, no await
+                }
+            }
+
             // Safety timeout: auto force-stop after MAX_RECORDING_MINUTES
             const maxTimeMs = this.MAX_RECORDING_MINUTES * 60 * 1000;
             this.safetyTimeout = setTimeout(() => {
@@ -311,23 +352,43 @@ class WidgetApp {
 
     async startWebRecording() {
         try {
+            // Refresh fluid setting from backend before each recording
+            // Skip in instant mode — use cached value from startup/settings change
+            if (!this.instantMode) {
+                await this.loadFluidTranscriptionSetting();
+            }
+
             console.log('🎛️ Requesting microphone access...');
-            
+
             // Check if mediaDevices is available
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 throw new Error('getUserMedia not supported');
             }
-            
+
             console.log('🎛️ navigator.mediaDevices available');
-            
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+
+            // Build audio constraints with preferred microphone
+            const audioConstraints = {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            };
+
+            try {
+                const micResponse = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
+                if (micResponse.ok) {
+                    const micData = await micResponse.json();
+                    if (micData.value && micData.value !== 'default') {
+                        audioConstraints.deviceId = { exact: micData.value };
+                        console.log('🎙️ Widget using preferred microphone:', micData.value);
+                    }
                 }
-            });
+            } catch (e) {
+                console.log('🎙️ Could not load mic preference, using system default');
+            }
+
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
             
             console.log('🎛️ Microphone access granted!');
             console.log('🎛️ Stream:', stream);
@@ -351,7 +412,15 @@ class WidgetApp {
             this.mediaRecorder.onstop = async () => {
                 console.log('🎛️ MediaRecorder stopped');
                 console.log('🎛️ isCancelled flag at onstop:', this.isCancelled);
-                
+                console.log('🎛️ _fluidStopping flag at onstop:', this._fluidStopping);
+
+                // If fluid transcription is handling the stop, skip all onstop logic
+                // handleFluidStop() manages its own state, hide, and cleanup
+                if (this._fluidStopping) {
+                    console.log('🎛️ Fluid transcription handling stop — onstop skipping');
+                    return;
+                }
+
                 // Only process if not cancelled
                 if (!this.isCancelled) {
                     console.log('🎛️ Processing recording...');
@@ -361,7 +430,7 @@ class WidgetApp {
                     // CRITICAL: Reset isCancelled flag ONLY after onstop fires
                     this.isCancelled = false;
                     console.log('🎛️ isCancelled flag reset after cancellation');
-                    
+
                     // Request widget hide if auto-hide is enabled
                     if (window.electronAPI && window.electronAPI.requestWidgetHide) {
                         console.log('🎛️ Requesting widget hide after cancellation...');
@@ -407,14 +476,23 @@ class WidgetApp {
             
             this.mediaRecorder.start();
             console.log('🎛️ MediaRecorder started');
-            
+
+            // Start fluid transcription if enabled
+            console.log(`🔄 Widget: fluid enabled=${this.isFluidEnabled}, manager=${!!this.fluidTranscription}`);
+            if (this.isFluidEnabled && this.fluidTranscription) {
+                console.log('🔄 Widget: Starting fluid transcription...');
+                this.fluidTranscription.start(stream);
+            } else {
+                console.log('🔄 Widget: Fluid OFF — using classic mode');
+            }
+
             this.startTimer();
             this.showCancelButton();
-            
+
             // Update recording state immediately
             this.isRecording = true;
             console.log('🎛️ Recording state updated to:', this.isRecording);
-            
+
             console.log('🎛️ Web recording started successfully');
             
         } catch (error) {
@@ -438,15 +516,26 @@ class WidgetApp {
 
     async stopWebRecording() {
         if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+            // Check if fluid transcription is active
+            const fluidActive = this.fluidTranscription && this.fluidTranscription.isActive();
+
+            if (fluidActive) {
+                // Prevent processWebRecording from running
+                this.isCancelled = true;
+                // Guard: tell onstop handler to skip entirely (fluid handles everything)
+                this._fluidStopping = true;
+            }
+
             this.mediaRecorder.stop();
-            
-            // Don't stop timer yet - it will freeze during transcribing state
-            
+
+            // Stop timer immediately — user pressed Stop, timer should freeze
+            this.stopTimer();
+
             // Clear recording source
             this.recordingSource = null;
-            
+
             console.log('🎛️ Web recording stopped');
-            
+
             // NOTIFY MAIN WINDOW: Widget stopped recording
             if (window.electronAPI && window.electronAPI.syncRecordingState) {
                 try {
@@ -457,6 +546,12 @@ class WidgetApp {
                 } catch (error) {
                     console.warn('⚠️ Could not notify main window:', error);
                 }
+            }
+
+            // If fluid was active, handle fluid stop flow
+            if (fluidActive) {
+                const duration = this.startTime ? (Date.now() - this.startTime) / 1000 : 0;
+                await this.handleFluidStop(duration);
             }
         }
     }
@@ -747,7 +842,8 @@ class WidgetApp {
 
     startTimer() {
         this.startTime = Date.now();
-        
+        this.timerDisplay.textContent = '00:00';
+
         this.timerInterval = setInterval(() => {
             const elapsed = Date.now() - this.startTime;
             const totalSeconds = Math.floor(elapsed / 1000);
@@ -792,11 +888,158 @@ class WidgetApp {
             this.timerInterval = null;
         }
         
-        // Reset timer color to default (white)
+        // Reset timer color and display to default
         this.timerDisplay.classList.remove('long-recording', 'max-time-warning');
-        
-        // DON'T reset timer text - keep it frozen at current time
-        // this.timerDisplay.textContent = '00:00';
+        this.timerDisplay.textContent = '00:00';
+    }
+
+    // ====================================
+    // FLUID TRANSCRIPTION
+    // ====================================
+
+    setInstantMode(isEnabled) {
+        this.instantMode = isEnabled;
+        if (isEnabled) {
+            document.body.classList.add('instant-mode');
+        } else {
+            document.body.classList.remove('instant-mode');
+        }
+        console.log(`⚡ Widget instant mode: ${isEnabled ? 'ON' : 'OFF'}`);
+    }
+
+    async loadInstantRecordingSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.instant_recording`);
+            if (response.ok) {
+                const data = await response.json();
+                this.setInstantMode(data.value || false);
+            }
+        } catch (error) {
+            console.error('❌ Widget: Error loading instant recording setting:', error);
+        }
+    }
+
+    async loadFluidTranscriptionSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.fluid_transcription`);
+            if (response.ok) {
+                const data = await response.json();
+                this.isFluidEnabled = data.value || false;
+                console.log('🔄 Widget: Fluid transcription setting:', this.isFluidEnabled);
+            }
+        } catch (error) {
+            console.error('❌ Widget: Error loading fluid setting:', error);
+            this.isFluidEnabled = false;
+        }
+    }
+
+    async handleFluidStop(recordingDuration) {
+        try {
+            // Show transcribing state
+            await this.setWidgetState('transcribing');
+            this.setTranscriptionProgress(10);
+
+            // Stop fluid and get assembled text
+            const fluidResult = await this.fluidTranscription.stop();
+            this.setTranscriptionProgress(60);
+
+            if (!fluidResult.text || !fluidResult.text.trim()) {
+                console.warn('⚠️ Widget: Fluid transcription returned empty text');
+                this.stopTimer();
+                await this.setWidgetState('inactive');
+                return;
+            }
+
+            // Save audio if needed
+            let audioId = null;
+            const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+            this.audioChunks = [];
+
+            let saveAudio = false;
+            try {
+                const resp = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.save_audio_files`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    saveAudio = data.value !== false;
+                }
+            } catch (e) {
+                saveAudio = true;
+            }
+
+            if (saveAudio || fluidResult.hasErrors) {
+                try {
+                    const saveFormData = new FormData();
+                    saveFormData.append('audio', audioBlob, 'recording.webm');
+
+                    const saveResp = await fetch(`${this.backendUrl}/api/transcribe/save-audio`, {
+                        method: 'POST',
+                        body: saveFormData
+                    });
+
+                    if (saveResp.ok) {
+                        const saveData = await saveResp.json();
+                        audioId = saveData.audio_id || null;
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Widget: Could not save audio:', e);
+                }
+            }
+
+            this.setTranscriptionProgress(80);
+
+            // Call fluid-complete endpoint
+            const completeResp = await fetch(`${this.backendUrl}/api/transcribe/fluid-complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: fluidResult.text,
+                    session_id: this.fluidTranscription.sessionId,
+                    total_segments: fluidResult.segments.length,
+                    failed_segments: fluidResult.failedCount,
+                    total_duration: recordingDuration,
+                    language: fluidResult.segments.find(s => s.language !== 'unknown')?.language || 'unknown',
+                    audio_id: audioId
+                })
+            });
+
+            this.setTranscriptionProgress(95);
+
+            if (completeResp.ok) {
+                const completeData = await completeResp.json();
+                console.log('✅ Widget: Fluid transcription saved:', completeData);
+
+                // Auto-paste
+                if (window.electronAPI && window.electronAPI.requestAutoPaste) {
+                    await window.electronAPI.requestAutoPaste(completeData.text);
+                }
+
+                // Notify main window to refresh history
+                if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                    await window.electronAPI.syncRecordingState('transcription_completed');
+                }
+
+                this.setTranscriptionProgress(100);
+            }
+
+            // Request widget hide if auto-hide enabled
+            if (window.electronAPI && window.electronAPI.requestWidgetHide) {
+                await window.electronAPI.requestWidgetHide();
+            }
+
+        } catch (error) {
+            console.error('❌ Widget: Fluid stop error:', error);
+            // Notify main window
+            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                try {
+                    await window.electronAPI.syncRecordingState('transcription_completed');
+                } catch (e) { /* ignore */ }
+            }
+        } finally {
+            this._fluidStopping = false;
+            this.isCancelled = false;
+            this.stopTimer();
+            await this.setWidgetState('inactive');
+        }
     }
 
     // 🔐 SLEEP/WAKE DETECTION
@@ -852,7 +1095,12 @@ class WidgetApp {
             
             this.isCancelled = true;
             console.log('✅ isCancelled set to true');
-            
+
+            // Clean up fluid transcription if active
+            if (this.fluidTranscription && this.fluidTranscription.isActive()) {
+                this.fluidTranscription.stop();
+            }
+
             // Stop actual recording
             if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
                 console.log('🛑 Stopping MediaRecorder...');
@@ -1026,24 +1274,31 @@ class WidgetApp {
     async showInactiveState() {
         // Signal that transcription is complete (accelerate progress to 95%)
         this.transcriptionCompleted = true;
-        
+
         // DON'T stop the progress interval here
         // Let it finish naturally and reach 95%, then it will stop itself
-        
-        // Change button content smoothly
-        await this.updateButtonContent('<i class="ph ph-microphone"></i>');
-        
-        // Button styling
-        this.recordButton.style.removeProperty('background-color');
-        this.recordButton.classList.remove('recording', 'processing');
-        this.recordButton.classList.add('inactive');
-        
-        // Fade out cancel button and timer (CSS handles the transition)
-        this.cancelButton.style.opacity = '0';
-        this.timerDisplay.style.opacity = '0';
-        
-        // Wait for fade out (100ms matches transition)
-        await new Promise(resolve => setTimeout(resolve, 100));
+
+        if (this.instantMode) {
+            // Instant mode: snap to inactive immediately, no fade delays
+            this.recordButton.innerHTML = '<i class="ph ph-microphone"></i>';
+            this.recordButton.style.opacity = '1';
+            this.recordButton.style.removeProperty('background-color');
+            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.add('inactive');
+            this.cancelButton.style.opacity = '0';
+            this.timerDisplay.style.opacity = '0';
+        } else {
+            // Normal mode: smooth transitions
+            await this.updateButtonContent('<i class="ph ph-microphone"></i>');
+            this.recordButton.style.removeProperty('background-color');
+            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.add('inactive');
+            this.cancelButton.style.opacity = '0';
+            this.timerDisplay.style.opacity = '0';
+
+            // Wait for fade out (100ms matches transition)
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
         
         // Compact widget - 48x48 (32x32 button + 8px padding)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
@@ -1096,22 +1351,27 @@ class WidgetApp {
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             await window.electronAPI.resizeWidget(130, 40);
         }
-        
+
         this.widgetContainer.classList.remove('compact');
         this.widgetContainer.classList.add('expanded');
-        
-        // Cancel button active (CSS handles visibility with fade)
+
+        // Cancel button active
         this.cancelButton.disabled = false;
         this.cancelButton.style.opacity = '1';
         this.timerDisplay.style.opacity = '1';
-        
-        // Change to recording class BEFORE content change for smooth color transition
+
         this.recordButton.classList.remove('inactive', 'processing');
         this.recordButton.classList.add('recording');
         this.recordButton.style.removeProperty('background-color');
-        
-        // Button shows stop square (content fade happens after color change)
-        await this.updateButtonContent('<div class="stop-square"></div>');
+
+        if (this.instantMode) {
+            // Instant mode: set content directly, no fade
+            this.recordButton.innerHTML = '<div class="stop-square"></div>';
+            this.recordButton.style.opacity = '1';
+        } else {
+            // Normal mode: smooth content fade
+            await this.updateButtonContent('<div class="stop-square"></div>');
+        }
     }
 
     async showRecordingActiveState() {
@@ -1328,12 +1588,12 @@ class WidgetApp {
         // Check if content is already the same to avoid unnecessary animation
         const currentContent = this.recordButton.innerHTML.trim();
         const newContentTrimmed = newContent.trim();
-        
+
         if (currentContent === newContentTrimmed) {
             return; // No change needed
         }
-        
-        if (skipAnimation) {
+
+        if (skipAnimation || this.instantMode) {
             // Direct change without animation
             this.recordButton.innerHTML = newContent;
             this.recordButton.style.opacity = '1';

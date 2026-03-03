@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; worker-src 'self'; connect-src 'self' http://127.0.0.1:57002 http://127.0.0.1:57003 http://127.0.0.1:57004 http://127.0.0.1:57005 http://127.0.0.1:57006 http://localhost:5000 https://*.onrender.com ws://127.0.0.1:57002 ws://127.0.0.1:57003 ws://127.0.0.1:57004 ws://127.0.0.1:57005 ws://127.0.0.1:57006;">
     <title>Stories</title>
     <link rel="stylesheet" href="../frontend/css/theme.css">
     <link rel="stylesheet" href="../frontend/css/layout.css">
@@ -90,6 +90,8 @@
                 <button id="loadMoreButton" class="load-more-button hidden">
                     View all
                 </button>
+
+                <!-- Transcription stats are now shown inline in the View Less footer -->
             </div>
         </main>
     </div>
@@ -122,6 +124,38 @@
                     </div>
                 </div>
                 
+                <!-- Instant Recording Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Instant recording</span>
+                            <span class="setting-tooltip" title="Skip animations for faster recording">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="instantRecordingToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Fluid Transcription Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Fluid transcription</span>
+                            <span class="setting-tooltip" title="Transcribe in real-time while recording for faster results">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="fluidTranscriptionToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Auto-hide Widget Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -137,7 +171,7 @@
                         </label>
                     </div>
                 </div>
-                
+
                 <!-- Auto-paste Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -153,7 +187,7 @@
                         </label>
                     </div>
                 </div>
-                
+
                 <!-- Audio Cues Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -169,7 +203,22 @@
                         </label>
                     </div>
                 </div>
-                
+
+                <!-- Microphone Selection -->
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Microphone</span>
+                            <span class="setting-tooltip" title="Choose which microphone to use for recording">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <select id="microphoneSelect" class="setting-select">
+                        <option value="default">System Default</option>
+                    </select>
+                </div>
+
                 <!-- Save Audio Toggle -->
                 <div class="setting-item setting-item-vertical">
                     <div class="setting-row">
@@ -179,7 +228,7 @@
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    
+
             <!-- Audio Storage Management (Only visible when Save Audio is enabled AND has files) -->
             <div id="audioStorageSection" class="audio-storage-section hidden">
                 <button class="icon-button-neutral hidden" id="openAudioFolderButton" title="Open Audio Folder">
@@ -192,7 +241,7 @@
                 </button>
             </div>
                 </div>
-                
+
                 <!-- Telemetry Toggle (only shown in internal builds) -->
                 <div id="telemetrySettingContainer" class="setting-item setting-item-vertical" style="display: none;">
                     <div class="setting-row">
@@ -289,6 +338,20 @@
         </div>
     </div>
     
+    <!-- Clear Transcription History Confirmation Modal -->
+    <div id="clearHistoryModal" class="modal-overlay hidden">
+        <div class="api-modal confirmation-modal">
+            <button class="modal-close" id="closeClearHistoryModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Clear All Transcriptions?</h3>
+            <p class="modal-description">This will permanently delete all transcription history. This action cannot be undone.</p>
+            <button class="modal-submit-danger" id="confirmClearHistory">
+                Clear All Transcriptions
+            </button>
+        </div>
+    </div>
+
     <!-- Add/Edit Word Modal -->
     <div id="wordModal" class="modal-overlay hidden">
         <div class="api-modal">
@@ -443,7 +506,8 @@
     <script src="../frontend/components/UIStateController.js"></script>
     <script src="../frontend/components/SoundManager.js"></script>
     <script src="../frontend/components/UpdateManager.js"></script>
-    
+    <script src="../frontend/components/FluidTranscriptionManager.js"></script>
+
     <!-- Main App Script -->
     <script src="../frontend/app.js"></script>
     

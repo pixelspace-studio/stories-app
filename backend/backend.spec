@@ -32,6 +32,7 @@ a = Analysis(
         'config_manager',
         'dictionary_manager',
         'window_manager',
+        'fluid_transcription',
     ],
     hookspath=[],
     hooksconfig={},

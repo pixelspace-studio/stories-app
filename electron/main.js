@@ -1128,38 +1128,44 @@ async function toggleRecording() {
   console.log('🎤 Toggle recording:', isRecording ? 'STOP' : 'START');
   
   // Check if API key is configured (only when starting recording)
+  // Use cached value to avoid blocking HTTP call on every toggle
   if (!isRecording) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
-      if (response.ok) {
-        const data = await response.json();
-        if (!data.has_api_key) {
-          console.warn('⚠️ Cannot start recording: No API Key configured');
-          
-          // Show notification
-          new Notification({
-            title: 'Stories - API Key Required',
-            body: 'Please add your OpenAI API Key in Settings before recording.',
-            silent: false
-          }).show();
-          
-          // Try to focus main window and show alert
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            if (mainWindow.isMinimized()) {
-              mainWindow.restore();
-            }
-            mainWindow.focus();
-            
-            // Send message to main window to show alert
-            mainWindow.webContents.send('sync-recording-state-broadcast', 'api_key_required');
-          }
-          
-          return; // Abort recording
+    if (!cachedHasApiKey) {
+      // Double-check with backend in case cache is stale
+      try {
+        const response = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
+        if (response.ok) {
+          const data = await response.json();
+          cachedHasApiKey = data.has_api_key || false;
         }
+      } catch (error) {
+        console.error('❌ Error checking API key status:', error);
+        // Continue anyway (backend might be starting up)
       }
-    } catch (error) {
-      console.error('❌ Error checking API key status:', error);
-      // Continue anyway (backend might be starting up)
+    }
+
+    if (!cachedHasApiKey) {
+      console.warn('⚠️ Cannot start recording: No API Key configured');
+
+      // Show notification
+      new Notification({
+        title: 'Stories - API Key Required',
+        body: 'Please add your OpenAI API Key in Settings before recording.',
+        silent: false
+      }).show();
+
+      // Try to focus main window and show alert
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.focus();
+
+        // Send message to main window to show alert
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'api_key_required');
+      }
+
+      return; // Abort recording
     }
   }
   
@@ -1167,9 +1173,10 @@ async function toggleRecording() {
   // This ensures auto-paste goes to the most recent app, not the initial one
   let wasInStoriesApp = false; // Track if user was already in Stories
   
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && autoPasteEnabled) {
     // Capture active app (for auto-paste detection)
-    
+    // Skip entirely when auto-paste is disabled — saves 300-500ms
+
     const { exec } = require('child_process');
     const script = `
       tell application "System Events"
@@ -1244,16 +1251,9 @@ async function toggleRecording() {
     }
   }
   
-  // If user was already in Stories, restore main window if minimized
-  // DON'T call moveTop() - it reorganizes z-order and moves window behind other apps
-  if (wasInStoriesApp && mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-      console.log('📱 Main window restored (was minimized)');
-    }
-    // Main window is already visible and at correct z-order
-    // Widget will appear on top due to NSPanel + setAlwaysOnTop
-  }
+  // If user was already in Stories, don't touch the main window state.
+  // If the user minimized it, respect that — only the widget needs to appear.
+  // Widget will appear on top due to NSPanel + setAlwaysOnTop regardless.
   
   // CRITICAL: Ensure dock icon stays visible (macOS NSPanel bug fix)
   // Call BEFORE showing widget to prevent race condition
@@ -1485,6 +1485,8 @@ async function loadStartupConfiguration() {
   const config = {
     autoHideWidget: false,
     autoPaste: false,
+    instantRecording: false,
+    hasApiKey: false,
     recordShortcut: 'CommandOrControl+Shift+R'
   };
   
@@ -1510,6 +1512,28 @@ async function loadStartupConfiguration() {
     console.warn('⚠️ Could not load auto-paste setting:', error.message);
   }
   
+  try {
+    // Load instant recording setting
+    const instantResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/settings/ui_settings.instant_recording`);
+    if (instantResponse.ok) {
+      const data = await instantResponse.json();
+      config.instantRecording = data.value || false;
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not load instant recording setting:', error.message);
+  }
+
+  try {
+    // Cache API key status at startup to avoid HTTP check on every recording toggle
+    const apiKeyResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/api-key`);
+    if (apiKeyResponse.ok) {
+      const data = await apiKeyResponse.json();
+      config.hasApiKey = data.has_api_key || false;
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not load API key status:', error.message);
+  }
+
   try {
     // Load record shortcut
     const shortcutResponse = await fetch(`http://127.0.0.1:${backendPort}/api/config/settings/shortcuts.record_toggle`);
@@ -1604,6 +1628,8 @@ app.whenReady().then(async () => {
     const config = await loadStartupConfiguration();
     autoHideWidgetEnabled = config.autoHideWidget;
     autoPasteEnabled = config.autoPaste || false;
+    instantRecordingEnabled = config.instantRecording || false;
+    cachedHasApiKey = config.hasApiKey || false;
     
     // Setup dock (macOS)
     if (process.platform === 'darwin') {
@@ -1932,6 +1958,12 @@ let widgetHideTimeout = null;
 // Auto-paste setting
 let autoPasteEnabled = false;
 
+// Instant recording setting (skip animations & defer non-critical work)
+let instantRecordingEnabled = false;
+
+// Cached API key status (avoid HTTP check on every recording toggle)
+let cachedHasApiKey = false;
+
 ipcMain.handle('set-auto-hide-widget', async (event, isEnabled) => {
   try {
     // CRITICAL: Only update widget visibility if setting ACTUALLY CHANGED
@@ -1975,6 +2007,27 @@ ipcMain.handle('set-auto-paste', async (event, isEnabled) => {
   }
 });
 
+ipcMain.handle('set-instant-recording', async (event, isEnabled) => {
+  try {
+    instantRecordingEnabled = isEnabled;
+    console.log(`⚡ Instant recording setting: ${isEnabled ? 'Enabled' : 'Disabled'}`);
+    // Notify widget to update its animation mode
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('instant-recording-changed', isEnabled);
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting instant recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-api-key-cache', async (event, hasKey) => {
+  cachedHasApiKey = hasKey;
+  console.log(`🔑 API key cache updated: ${hasKey}`);
+  return { success: true };
+});
+
 ipcMain.handle('request-widget-hide', async (event) => {
   try {
     if (autoHideWidgetEnabled && widgetWindow && !widgetWindow.isDestroyed()) {
@@ -2007,11 +2060,12 @@ ipcMain.handle('request-widget-hide', async (event) => {
               // CRITICAL: Don't bring main window to front when hiding widget
               // If user was in another app, they should stay there
               // Only restore focus if main window was already focused (user was in Stories)
-              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
                 // Main window lost focus unexpectedly, restore it only if it was focused before
+                // But never unminimize — respect the user's minimized state
                 mainWindow.focus();
               }
-              // If wasMainWindowFocused = false, do nothing - user stays in their current app
+              // If wasMainWindowFocused = false or minimized, do nothing - user stays in their current app
             }
           } else if (attempt < maxAttempts) {
             // Widget is still recording/transcribing, wait 500ms and check again
@@ -2022,8 +2076,8 @@ ipcMain.handle('request-widget-hide', async (event) => {
             if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
               isWidgetActive = false; // Mark widget as inactive
               widgetWindow.hide();
-              // Same focus logic: only restore if it was focused before
-              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+              // Same focus logic: only restore if it was focused before and not minimized
+              if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
                 mainWindow.focus();
               }
             }
@@ -2034,19 +2088,24 @@ ipcMain.handle('request-widget-hide', async (event) => {
           if (widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
             isWidgetActive = false; // Mark widget as inactive
             widgetWindow.hide();
-            // Same focus logic: only restore if it was focused before
-            if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused()) {
+            // Same focus logic: only restore if it was focused before and not minimized
+            if (mainWindow && !mainWindow.isDestroyed() && wasMainWindowFocused && !mainWindow.isFocused() && !mainWindow.isMinimized()) {
               mainWindow.focus();
             }
           }
         }
       };
       
-      // Start checking after 1 second delay
-      widgetHideTimeout = setTimeout(() => {
+      if (instantRecordingEnabled) {
+        // Instant mode: hide immediately, no delay
         waitForInactiveAndHide();
-        widgetHideTimeout = null;
-      }, 1000);
+      } else {
+        // Normal mode: start checking after 1 second delay
+        widgetHideTimeout = setTimeout(() => {
+          waitForInactiveAndHide();
+          widgetHideTimeout = null;
+        }, 1000);
+      }
     }
     
     return { success: true };
@@ -2242,6 +2301,22 @@ async function detectCurrentApp() {
       });
 }
 
+/**
+ * Promisified child_process.exec for clean async/await usage
+ */
+function execPromise(command) {
+  const { exec } = require('child_process');
+  return new Promise((resolve, reject) => {
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
+
 // ============================================================================
 // AUTO-PASTE HANDLER
 // ============================================================================
@@ -2250,7 +2325,7 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
   try {
     // Copy to clipboard first
     clipboard.writeText(text);
-    
+
     // Check if auto-paste is enabled
     if (!autoPasteEnabled) {
       console.log('📋 Auto-paste skipped (disabled by user)');
@@ -2261,7 +2336,24 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'Auto-paste disabled' };
     }
-    
+
+    // ========================================================================
+    // FAIL FAST: Check Accessibility BEFORE doing anything else
+    // ========================================================================
+    if (process.platform === 'darwin') {
+      const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
+      if (!hasAccessibility) {
+        console.error('❌ Auto-paste blocked: Missing Accessibility permission');
+        console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
+        new Notification({
+          title: 'Stories - Accessibility Required',
+          body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
+          silent: false
+        }).show();
+        return { success: false, reason: 'Missing Accessibility permission' };
+      }
+    }
+
     // ========================================================================
     // PRIORITY-BASED TARGET APP DETECTION
     // ========================================================================
@@ -2272,26 +2364,37 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
     // PRIORITY 3: Clipboard notification (no valid app found)
     //             → Fallback when user is in Stories or no app detected
     // ========================================================================
-    
+
     let targetApp = null;
-    
+
     // PRIORITY 1: Detect CURRENT app (in real-time)
     const currentApp = await detectCurrentApp();
-    
+
     if (isValidApp(currentApp)) {
       targetApp = currentApp;
     } else {
-      // PRIORITY 2: Use CAPTURED app (from toggleRecording)
-      // If lastActiveApp is Stories, wait for async fallback to complete
-      if (lastActiveApp === 'Stories' || lastActiveApp === 'Electron' || lastActiveApp === 'stories') {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-      }
-      
+      // PRIORITY 2: Use CAPTURED app (from toggleRecording or async fallback)
       if (isValidApp(lastActiveApp)) {
         targetApp = lastActiveApp;
+      } else {
+        // Retry detection with short delays — catches cases where the app
+        // behind the widget hasn't become frontmost yet
+        const retryDelays = [300, 600, 900];
+        for (const retryDelay of retryDelays) {
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+          const retryApp = await detectCurrentApp();
+          if (isValidApp(retryApp)) {
+            targetApp = retryApp;
+            break;
+          }
+          if (isValidApp(lastActiveApp)) {
+            targetApp = lastActiveApp;
+            break;
+          }
+        }
       }
     }
-    
+
     // PRIORITY 3: Clipboard notification (no valid target)
     if (!targetApp) {
       new Notification({
@@ -2301,95 +2404,76 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'No target app detected' };
     }
-    
-    // Execute auto-paste
-    if (process.platform === 'darwin') {
-      const { exec } = require('child_process');
-      
-      // Determine delay based on app type
-      const electronApps = ['Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion'];
-      const isElectronApp = electronApps.some(app => targetApp.includes(app));
-      const activationDelay = isElectronApp ? 1000 : 500; // milliseconds
-      
-      try {
-        // Step 1: Activate target app using AppleScript
-        const activateScript = `tell application "${targetApp}" to activate`;
-        
-        exec(`osascript -e '${activateScript}'`, (activateError, activateStdout, activateStderr) => {
-          if (activateError) {
-            new Notification({
-              title: 'Stories',
-              body: 'Text copied to clipboard',
-              silent: true
-            }).show();
-            return;
-          }
-          
-          // Step 2: Wait for app to be ready, then paste
-          setTimeout(() => {
-            // CRITICAL: Verify Accessibility permissions BEFORE attempting paste
-            const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
-            
-            if (!hasAccessibility) {
-              console.error('❌ Auto-paste blocked: Missing Accessibility permission');
-              console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
-              console.error('   If permission shown but not working: Close Stories, run "tccutil reset Accessibility com.pixelspace.stories", restart Mac');
-              
-              new Notification({
-                title: 'Stories - Accessibility Required',
-                body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
-                silent: false
-              }).show();
-              
-              return;
-            }
-            
-            try {
-              // Verify robotjs is loaded
-              if (!robot || typeof robot.keyTap !== 'function') {
-                throw new Error('robotjs module not loaded correctly');
-              }
-              
-              // Execute auto-paste
-              robot.keyTap('v', 'command');
-              console.log('✅ Auto-paste SUCCESS →', targetApp, `(${text.length} chars)`);
-              
-            } catch (robotError) {
-              console.error('❌ Auto-paste failed:', robotError.message);
-              
-          new Notification({
-            title: 'Stories',
-                body: 'Text copied to clipboard - press Cmd+V to paste',
-            silent: true
-          }).show();
-            }
-          }, activationDelay);
-        });
-        
-      } catch (error) {
-        console.error('❌ Auto-paste setup error:', error.message);
-        
-        new Notification({
-          title: 'Stories',
-          body: 'Text copied to clipboard',
-          silent: true
-        }).show();
-      }
-      
-    } else {
+
+    // ========================================================================
+    // SINGLE APPLESCRIPT: activate + delay + keystroke (atomic)
+    // ========================================================================
+    if (process.platform !== 'darwin') {
       console.log('⚠️ Auto-paste not supported on this platform');
       new Notification({
         title: 'Stories',
         body: 'Text copied - press Cmd+V to paste',
         silent: true
       }).show();
+      return { success: false, reason: 'Platform not supported' };
     }
-    
-    return { success: true };
+
+    // Determine delay based on app type — Electron apps need longer to accept focus
+    const electronApps = [
+      'Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion',
+      'Figma', 'Obsidian', 'WhatsApp', 'Telegram', '1Password', 'Postman',
+      'Spotify', 'Teams', 'WebStorm', 'IntelliJ IDEA',
+    ];
+    const isElectronApp = electronApps.some(app => targetApp.includes(app));
+    const delay = isElectronApp ? 1.2 : 0.5;
+
+    // Escape double quotes in app name to prevent AppleScript injection
+    const safeAppName = targetApp.replace(/"/g, '\\"');
+
+    const pasteScript = `
+      tell application "${safeAppName}" to activate
+      delay ${delay}
+      tell application "System Events"
+        keystroke "v" using command down
+      end tell
+    `;
+
+    try {
+      await execPromise(`osascript -e '${pasteScript}'`);
+    } catch (pasteError) {
+      console.error('❌ Auto-paste AppleScript failed:', pasteError.message);
+      new Notification({
+        title: 'Stories',
+        body: 'Text copied to clipboard - press Cmd+V to paste',
+        silent: true
+      }).show();
+      return { success: false, reason: 'AppleScript failed', error: pasteError.message };
+    }
+
+    // ========================================================================
+    // VERIFICATION + RETRY: confirm focus wasn't stolen
+    // ========================================================================
+    const appAfterPaste = await detectCurrentApp();
+
+    if (appAfterPaste && appAfterPaste !== targetApp) {
+      try {
+        await execPromise(`osascript -e '${pasteScript}'`);
+      } catch (retryError) {
+        console.error('❌ Auto-paste retry failed:', retryError.message);
+        new Notification({
+          title: 'Stories',
+          body: 'Text copied to clipboard - press Cmd+V to paste',
+          silent: true
+        }).show();
+        return { success: false, reason: 'Retry failed', error: retryError.message };
+      }
+    }
+
+    console.log(`✅ Auto-paste SUCCESS → "${targetApp}" (${text.length} chars)`);
+    return { success: true, targetApp };
   } catch (error) {
     console.error('❌ Auto-paste error:', error.message);
     console.error('   Stack trace:', error.stack);
-    console.log('================================================================================');
     return { success: false, error: error.message };
   }
 });

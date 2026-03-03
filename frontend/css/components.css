@@ -551,6 +551,39 @@
     display: none;
 }
 
+/* View Less Footer Row */
+.view-less-footer {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: var(--space-4);
+    width: 100%;
+    flex-shrink: 0;
+}
+
+.view-less-footer.hidden {
+    display: none;
+}
+
+.view-less-footer .show-less-button {
+    margin: 0 auto;
+}
+
+.transcription-stats-inline {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.transcription-stats-inline.hidden {
+    display: none;
+}
+
 /* ===================================
    6. Empty State
    =================================== */
@@ -801,6 +834,38 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0;
+}
+
+/* Setting Select Dropdown */
+.setting-select {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    margin-top: var(--space-2);
+    background: var(--gray-20);
+    border: 1px solid var(--gray-25);
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: var(--space-8);
+}
+
+.setting-select:hover {
+    border-color: var(--gray-40);
+}
+
+.setting-select:focus {
+    outline: none;
+    border-color: var(--color-black);
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
 }
 
 .setting-row {
