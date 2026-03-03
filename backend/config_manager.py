@@ -58,7 +58,8 @@ class ConfigurationManager:
                 'save_audio_files': True,
                 'cleanup_days': 30,
                 'keep_failed_files': True,
-                'max_file_size_mb': 25
+                'max_file_size_mb': 25,
+                'preferred_microphone': 'default'
             },
             'ui_settings': {
                 'theme': 'system',
