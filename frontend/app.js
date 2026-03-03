@@ -312,13 +312,32 @@ class VoiceToTextApp {
         this.gradientOverlay = document.getElementById('gradientOverlay');
         this.sectionTitle = document.querySelector('.section-title');
         
-        // Create View Less button dynamically
+        // Create View Less footer row dynamically (contains View Less button + stats + delete)
+        this.viewLessFooter = document.createElement('div');
+        this.viewLessFooter.className = 'view-less-footer hidden';
+
         this.showLessButton = document.createElement('button');
-        this.showLessButton.className = 'show-less-button hidden';
+        this.showLessButton.className = 'show-less-button';
         this.showLessButton.textContent = 'View less';
         this.showLessButton.addEventListener('click', () => {
             this.handleShowLess();
         });
+
+        // Stats + delete (right side of footer)
+        this.transcriptionStatsSection = document.createElement('div');
+        this.transcriptionStatsSection.className = 'transcription-stats-inline hidden';
+        this.transcriptionStatsText = document.createElement('span');
+        this.transcriptionStatsText.className = 'storage-stats-text';
+        this.clearHistoryButton = document.createElement('button');
+        this.clearHistoryButton.className = 'icon-button-delete';
+        this.clearHistoryButton.id = 'clearHistoryButton';
+        this.clearHistoryButton.title = 'Clear all transcriptions';
+        this.clearHistoryButton.innerHTML = '<i class="ph ph-trash"></i>';
+        this.transcriptionStatsSection.appendChild(this.transcriptionStatsText);
+        this.transcriptionStatsSection.appendChild(this.clearHistoryButton);
+
+        this.viewLessFooter.appendChild(this.showLessButton);
+        this.viewLessFooter.appendChild(this.transcriptionStatsSection);
         
         // Placeholder buttons
         this.shortcutsButton = document.getElementById('shortcutsButton');
@@ -388,9 +407,7 @@ class VoiceToTextApp {
         this.confirmClearAudio = document.getElementById('confirmClearAudio');
 
         // Clear Transcription History
-        this.transcriptionStatsSection = document.getElementById('transcriptionStatsSection');
-        this.transcriptionStatsText = document.getElementById('transcriptionStatsText');
-        this.clearHistoryButton = document.getElementById('clearHistoryButton');
+        // transcriptionStatsSection, transcriptionStatsText, and clearHistoryButton are created dynamically above
         this.clearHistoryModal = document.getElementById('clearHistoryModal');
         this.closeClearHistoryModal = document.getElementById('closeClearHistoryModal');
         this.confirmClearHistory = document.getElementById('confirmClearHistory');
@@ -1507,10 +1524,10 @@ class VoiceToTextApp {
                 }, 0);
             }
             this.loadMoreButton.classList.add('hidden');
-            this.showLessButton.classList.add('hidden');
+            this.viewLessFooter.classList.add('hidden');
             this.gradientOverlay.classList.add('hidden');
             this.transcriptionsContainer.classList.remove('scrollable');
-            
+
             // Mark app as loaded (trigger crossfade from skeleton to empty state)
             this.markAppAsLoaded();
             return;
@@ -1531,25 +1548,28 @@ class VoiceToTextApp {
             fragment.appendChild(card);
         });
         
-        // Add View Less button at the end if showing all
+        // Add View Less footer (with stats) at the end if showing all
         if (this.showingAll) {
-            this.showLessButton.classList.remove('hidden');
-            fragment.appendChild(this.showLessButton);
+            this.viewLessFooter.classList.remove('hidden');
+            fragment.appendChild(this.viewLessFooter);
         } else {
-            this.showLessButton.classList.add('hidden');
+            this.viewLessFooter.classList.add('hidden');
         }
         
         // Single DOM insertion (optimized)
         this.transcriptionsContainer.appendChild(fragment);
         
         // Check if content overflows after rendering
+        // Temporarily enable scroll to get true scrollHeight
+        this.transcriptionsContainer.classList.add('scrollable');
+
         setTimeout(() => {
             const hasOverflow = this.transcriptionsContainer.scrollHeight > this.transcriptionsContainer.clientHeight;
             const hasMoreTranscriptions = transcriptions.length > this.initialDisplayCount;
-            
+
             // Show Load More if: more transcriptions OR content overflows
             const shouldShowLoadMore = !this.showingAll && (hasMoreTranscriptions || hasOverflow);
-            
+
             if (this.showingAll) {
                 // Showing all: hide Load More, enable scroll
                 this.loadMoreButton.classList.add('hidden');
