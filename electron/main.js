@@ -1173,40 +1173,21 @@ async function toggleRecording() {
   // This ensures auto-paste goes to the most recent app, not the initial one
   let wasInStoriesApp = false; // Track if user was already in Stories
   
-  if (process.platform === 'darwin' && autoPasteEnabled) {
+  if ((process.platform === 'darwin' || process.platform === 'win32') && autoPasteEnabled) {
     // Capture active app (for auto-paste detection)
     // Skip entirely when auto-paste is disabled — saves 300-500ms
 
-    const { exec } = require('child_process');
-    const script = `
-      tell application "System Events"
-        try
-          set frontmostApp to name of first application process whose frontmost is true
-          return frontmostApp
-        on error
-          return "Unknown"
-        end try
-      end tell
-    `;
-    
-    // WAIT for the app capture to complete before continuing
-    await new Promise((resolve) => {
-      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
-        if (!error && stdout) {
-          const appName = stdout.trim();
-          
-          // Check if user was already in Stories app
-          if (appName === 'Electron' || appName === 'Stories' || appName === 'stories') {
-            wasInStoriesApp = true;
-          } else {
-            // User is in another app - save/update it for auto-paste
-            lastActiveApp = appName;
-          }
-        }
-        resolve(); // Always resolve to continue
-      });
-    });
-    
+    const detectedAppName = await detectCurrentApp();
+    if (detectedAppName) {
+      // Check if user was already in Stories app
+      if (detectedAppName === 'Electron' || detectedAppName === 'Stories' || detectedAppName === 'stories') {
+        wasInStoriesApp = true;
+      } else {
+        // User is in another app - save/update it for auto-paste
+        lastActiveApp = detectedAppName;
+      }
+    }
+
     // CRITICAL FIX: If we detected Stories when STOPPING, schedule async fallback detection
     // This catches the case where user navigated: App A → App B → App C → Stories
     // We want App C (last non-Stories app), not App A (initial app)
@@ -1217,33 +1198,13 @@ async function toggleRecording() {
       (async () => {
         const maxAttempts = 3;
         const delays = [400, 800, 1200]; // Progressive delays in ms
-        let detectedApp = null;
-        
+
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          const currentDelay = delays[attempt];
-          await new Promise(resolve => setTimeout(resolve, currentDelay));
-          
-          // Try to detect the app
-          detectedApp = await new Promise((resolve) => {
-            exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
-              if (!error && stdout) {
-                const appName = stdout.trim();
-                
-                // Check if it's a valid app (not Stories/Electron/Unknown)
-                if (appName !== 'Electron' && appName !== 'Stories' && appName !== 'stories' && appName !== 'Unknown') {
-                  resolve(appName); // Valid app found
-                } else {
-                  resolve(null); // Invalid, keep trying
-                }
-              } else {
-                resolve(null); // Error, keep trying
-              }
-            });
-          });
-          
-          // If we found a valid app, stop trying
-          if (detectedApp) {
-            lastActiveApp = detectedApp;
+          await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+
+          const retryAppName = await detectCurrentApp();
+          if (isValidApp(retryAppName)) {
+            lastActiveApp = retryAppName;
             break;
           }
         }
@@ -2257,20 +2218,56 @@ ipcMain.handle('open-audio-folder', async (event) => {
  * @returns {boolean} - True if app is valid for auto-paste
  */
 function isValidApp(app) {
-  return app && 
-         app !== 'Stories' && 
-         app !== 'Electron' && 
-         app !== 'stories' &&
-         app !== 'Unknown' &&
-         app !== '' &&
-         !app.startsWith('Error:');
+  if (!app || app === '' || app.startsWith('Error:')) return false;
+
+  // macOS invalid apps
+  if (app === 'Stories' || app === 'Electron' || app === 'stories' || app === 'Unknown') return false;
+
+  // Windows shell/system processes that aren't valid paste targets
+  const windowsSystemApps = ['explorer', 'SearchHost', 'ShellExperienceHost', 'TextInputHost'];
+  if (process.platform === 'win32' && windowsSystemApps.includes(app)) return false;
+
+  return true;
 }
 
 /**
- * Detect the current frontmost app using AppleScript
+ * Detect the current frontmost app on Windows using PowerShell + Win32 API
+ * @returns {Promise<string|null>} - Window title or null if detection fails
+ */
+async function detectCurrentAppWindows() {
+  const script = [
+    'Add-Type @"',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class User32 {',
+    '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);',
+    '}',
+    '"@',
+    '$hwnd = [User32]::GetForegroundWindow()',
+    '$pid = 0',
+    '[User32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null',
+    '(Get-Process -Id $pid).MainWindowTitle',
+  ].join('\n');
+  try {
+    // Use -EncodedCommand to avoid shell quoting issues with C# code
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    const { stdout } = await execPromise(`powershell -NoProfile -EncodedCommand ${encoded}`);
+    return stdout.trim() || null;
+  } catch (error) {
+    console.log('❌ Windows app detection failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Detect the current frontmost app using AppleScript (macOS) or PowerShell (Windows)
  * @returns {Promise<string|null>} - App name or null if detection fails
  */
 async function detectCurrentApp() {
+  if (process.platform === 'win32') {
+    return detectCurrentAppWindows();
+  }
   if (process.platform !== 'darwin') {
     return null;
   }
@@ -2406,67 +2403,106 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
     }
 
     // ========================================================================
-    // SINGLE APPLESCRIPT: activate + delay + keystroke (atomic)
+    // ACTIVATE TARGET APP + PASTE KEYSTROKE (platform-specific)
     // ========================================================================
-    if (process.platform !== 'darwin') {
-      console.log('⚠️ Auto-paste not supported on this platform');
-      new Notification({
-        title: 'Stories',
-        body: 'Text copied - press Cmd+V to paste',
-        silent: true
-      }).show();
-      return { success: false, reason: 'Platform not supported' };
-    }
 
-    // Determine delay based on app type — Electron apps need longer to accept focus
-    const electronApps = [
-      'Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion',
-      'Figma', 'Obsidian', 'WhatsApp', 'Telegram', '1Password', 'Postman',
-      'Spotify', 'Teams', 'WebStorm', 'IntelliJ IDEA',
-    ];
-    const isElectronApp = electronApps.some(app => targetApp.includes(app));
-    const delay = isElectronApp ? 1.2 : 0.5;
+    if (process.platform === 'darwin') {
+      // --- macOS: AppleScript activate + keystroke ---
+      const electronApps = [
+        'Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion',
+        'Figma', 'Obsidian', 'WhatsApp', 'Telegram', '1Password', 'Postman',
+        'Spotify', 'Teams', 'WebStorm', 'IntelliJ IDEA',
+      ];
+      const isElectronApp = electronApps.some(app => targetApp.includes(app));
+      const delay = isElectronApp ? 1.2 : 0.5;
 
-    // Escape double quotes in app name to prevent AppleScript injection
-    const safeAppName = targetApp.replace(/"/g, '\\"');
+      const safeAppName = targetApp.replace(/"/g, '\\"');
 
-    const pasteScript = `
-      tell application "${safeAppName}" to activate
-      delay ${delay}
-      tell application "System Events"
-        keystroke "v" using command down
-      end tell
-    `;
+      const pasteScript = `
+        tell application "${safeAppName}" to activate
+        delay ${delay}
+        tell application "System Events"
+          keystroke "v" using command down
+        end tell
+      `;
 
-    try {
-      await execPromise(`osascript -e '${pasteScript}'`);
-    } catch (pasteError) {
-      console.error('❌ Auto-paste AppleScript failed:', pasteError.message);
-      new Notification({
-        title: 'Stories',
-        body: 'Text copied to clipboard - press Cmd+V to paste',
-        silent: true
-      }).show();
-      return { success: false, reason: 'AppleScript failed', error: pasteError.message };
-    }
-
-    // ========================================================================
-    // VERIFICATION + RETRY: confirm focus wasn't stolen
-    // ========================================================================
-    const appAfterPaste = await detectCurrentApp();
-
-    if (appAfterPaste && appAfterPaste !== targetApp) {
       try {
         await execPromise(`osascript -e '${pasteScript}'`);
-      } catch (retryError) {
-        console.error('❌ Auto-paste retry failed:', retryError.message);
+      } catch (pasteError) {
+        console.error('❌ Auto-paste AppleScript failed:', pasteError.message);
         new Notification({
           title: 'Stories',
           body: 'Text copied to clipboard - press Cmd+V to paste',
           silent: true
         }).show();
-        return { success: false, reason: 'Retry failed', error: retryError.message };
+        return { success: false, reason: 'AppleScript failed', error: pasteError.message };
       }
+
+      // Verification + retry: confirm focus wasn't stolen
+      const appAfterPaste = await detectCurrentApp();
+      if (appAfterPaste && appAfterPaste !== targetApp) {
+        try {
+          await execPromise(`osascript -e '${pasteScript}'`);
+        } catch (retryError) {
+          console.error('❌ Auto-paste retry failed:', retryError.message);
+          new Notification({
+            title: 'Stories',
+            body: 'Text copied to clipboard - press Cmd+V to paste',
+            silent: true
+          }).show();
+          return { success: false, reason: 'Retry failed', error: retryError.message };
+        }
+      }
+    } else if (process.platform === 'win32') {
+      // --- Windows: PowerShell AppActivate + robotjs Ctrl+V ---
+      const safeAppName = targetApp.replace(/'/g, "''");
+
+      try {
+        await execPromise(`powershell -NoProfile -Command "(New-Object -ComObject WScript.Shell).AppActivate('${safeAppName}')"`);
+      } catch (activateError) {
+        console.error('❌ Windows app activation failed:', activateError.message);
+      }
+
+      // Short delay for the target window to gain focus
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      try {
+        robot.keyTap('v', 'control');
+      } catch (pasteError) {
+        console.error('❌ Windows paste keystroke failed:', pasteError.message);
+        new Notification({
+          title: 'Stories',
+          body: 'Text copied to clipboard - press Ctrl+V to paste',
+          silent: true
+        }).show();
+        return { success: false, reason: 'Paste keystroke failed', error: pasteError.message };
+      }
+
+      // Verification + retry: confirm focus wasn't stolen
+      const appAfterPaste = await detectCurrentApp();
+      if (appAfterPaste && appAfterPaste !== targetApp) {
+        try {
+          await execPromise(`powershell -NoProfile -Command "(New-Object -ComObject WScript.Shell).AppActivate('${safeAppName}')"`);
+          await new Promise(resolve => setTimeout(resolve, 300));
+          robot.keyTap('v', 'control');
+        } catch (retryError) {
+          console.error('❌ Windows auto-paste retry failed:', retryError.message);
+          new Notification({
+            title: 'Stories',
+            body: 'Text copied to clipboard - press Ctrl+V to paste',
+            silent: true
+          }).show();
+          return { success: false, reason: 'Retry failed', error: retryError.message };
+        }
+      }
+    } else {
+      console.log('⚠️ Auto-paste not supported on this platform');
+      new Notification({
+        title: 'Stories',
+        body: 'Text copied to clipboard',
+        silent: true
+      }).show();
+      return { success: false, reason: 'Platform not supported' };
     }
 
     console.log(`✅ Auto-paste SUCCESS → "${targetApp}" (${text.length} chars)`);
