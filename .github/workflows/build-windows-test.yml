@@ -1,0 +1,60 @@
+name: Build Windows Test
+
+on:
+  push:
+    branches:
+      - fix/windows
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build backend executable
+        run: |
+          cd backend
+          pyinstaller backend.spec
+          dir dist\
+          echo "Backend executable created"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build Electron app
+        run: npm run make:community
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List build outputs
+        run: dir out\make\ /s /b
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stories-Windows-Test
+          path: |
+            out/make/**/*.exe
+            out/make/**/*.zip
+          retention-days: 30
