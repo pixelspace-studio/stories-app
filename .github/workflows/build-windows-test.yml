@@ -40,6 +40,12 @@ jobs:
           dir dist\
           echo "Backend executable created"
 
+      - name: Move backend to expected location
+        run: |
+          mkdir dist
+          copy backend\dist\stories-backend.exe dist\stories-backend
+          dir dist\
+
       - name: Install Node dependencies
         run: npm ci
 

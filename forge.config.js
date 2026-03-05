@@ -8,7 +8,7 @@ module.exports = {
   packagerConfig: {
     name: 'Stories',
     executableName: 'stories',
-    icon: './assets/icons/icon.icns',
+    icon: './assets/icons/icon',  // Electron Forge resolves .icns/.ico per platform
     appBundleId: 'com.pixelspace.stories',
     appCategoryType: 'public.app-category.productivity',
     extendInfo: {
@@ -47,9 +47,11 @@ module.exports = {
     // },
     extraResource: [
       './dist/stories-backend',  // Standalone executable
-      './entitlements.mac.plist',
-      './DMG_README.txt',        // Instructions for users
-      './scripts/Uninstall Stories.app'  // Uninstaller app (v1.1 - notarizable)
+      ...(process.platform === 'darwin' ? [
+        './entitlements.mac.plist',
+        './DMG_README.txt',        // Instructions for users
+        './scripts/Uninstall Stories.app'  // Uninstaller app (v1.1 - notarizable)
+      ] : [])
     ]
   },
   rebuildConfig: {},
