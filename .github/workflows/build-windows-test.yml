@@ -44,8 +44,9 @@ jobs:
         run: npm ci
 
       - name: Build Electron app
-        run: npm run make:community
+        run: npx electron-forge make
         env:
+          BUILD_TYPE: community
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: List build outputs
