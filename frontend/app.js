@@ -340,6 +340,9 @@ class VoiceToTextApp {
         this.instantRecordingToggle = document.getElementById('instantRecordingToggle');
         this.telemetryToggle = document.getElementById('telemetryToggle');
         this.fluidTranscriptionToggle = document.getElementById('fluidTranscriptionToggle');
+        this.realtimeFeedSettingItem = document.getElementById('realtimeFeedSettingItem');
+        this.realtimeFeedToggle = document.getElementById('realtimeFeedToggle');
+        this.copyFeedPathButton = document.getElementById('copyFeedPathButton');
         this.privacyPolicyLink = document.getElementById('privacyPolicyLink');
         
         // Audio Storage Section
@@ -811,6 +814,21 @@ class VoiceToTextApp {
         if (this.fluidTranscriptionToggle) {
             this.fluidTranscriptionToggle.addEventListener('change', () => {
                 this.toggleFluidTranscription();
+            });
+        }
+
+        // Real-time Feed toggle
+        if (this.realtimeFeedToggle) {
+            this.realtimeFeedToggle.addEventListener('change', () => {
+                this.toggleRealtimeFeed();
+            });
+        }
+
+        // Copy Feed Path button
+        if (this.copyFeedPathButton) {
+            this.copyFeedPathButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.copyFeedPath();
             });
         }
 
@@ -2270,6 +2288,9 @@ class VoiceToTextApp {
         // Load fluid transcription setting
         await this.loadFluidTranscriptionSetting();
 
+        // Load real-time feed setting (depends on fluid state)
+        await this.loadRealtimeFeedSetting();
+
         // Open with ModalManager
         this.modalManager.open('settings', { delay: 10 });
     }
@@ -3651,10 +3672,13 @@ class VoiceToTextApp {
                 if (this.fluidTranscriptionToggle) {
                     this.fluidTranscriptionToggle.checked = this.isFluidEnabled;
                 }
+                // Show/hide real-time feed setting based on fluid state
+                this.updateRealtimeFeedVisibility();
             }
         } catch (error) {
             console.error('❌ Error loading fluid transcription setting:', error);
             this.isFluidEnabled = false;
+            this.updateRealtimeFeedVisibility();
         }
     }
 
@@ -3669,8 +3693,76 @@ class VoiceToTextApp {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ value: isEnabled })
             });
+
+            // If fluid turned OFF, auto-disable real-time feed
+            if (!isEnabled && this.realtimeFeedToggle && this.realtimeFeedToggle.checked) {
+                this.realtimeFeedToggle.checked = false;
+                await this.toggleRealtimeFeed();
+            }
+            this.updateRealtimeFeedVisibility();
         } catch (error) {
             console.error('❌ Error saving fluid transcription setting:', error);
+        }
+    }
+
+    // ====================================
+    // REAL-TIME FEED
+    // ====================================
+
+    updateRealtimeFeedVisibility() {
+        if (this.realtimeFeedSettingItem) {
+            if (this.isFluidEnabled) {
+                this.realtimeFeedSettingItem.classList.remove('setting-disabled');
+                if (this.realtimeFeedToggle) this.realtimeFeedToggle.disabled = false;
+            } else {
+                this.realtimeFeedSettingItem.classList.add('setting-disabled');
+                if (this.realtimeFeedToggle) this.realtimeFeedToggle.disabled = true;
+            }
+        }
+    }
+
+    async loadRealtimeFeedSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.realtime_feed`);
+            if (response.ok) {
+                const data = await response.json();
+                const isEnabled = data.value || false;
+                console.log('📡 Current real-time feed setting:', isEnabled);
+                if (this.realtimeFeedToggle) {
+                    this.realtimeFeedToggle.checked = isEnabled;
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading real-time feed setting:', error);
+        }
+    }
+
+    async toggleRealtimeFeed() {
+        const isEnabled = this.realtimeFeedToggle ? this.realtimeFeedToggle.checked : false;
+        console.log('📡 Real-time feed toggled:', isEnabled);
+
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.realtime_feed`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: isEnabled })
+            });
+        } catch (error) {
+            console.error('❌ Error saving real-time feed setting:', error);
+        }
+    }
+
+    async copyFeedPath() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/feeds/path`);
+            if (response.ok) {
+                const data = await response.json();
+                await navigator.clipboard.writeText(data.path);
+                this.showToast('Feed path copied to clipboard', 'success');
+            }
+        } catch (error) {
+            console.error('❌ Error copying feed path:', error);
+            this.showToast('Failed to copy feed path', 'error');
         }
     }
 

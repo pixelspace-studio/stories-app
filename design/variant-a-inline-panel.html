@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=700, initial-scale=1.0">
+    <title>Variant A: Inline Panel</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+    <style>
+        /* === Design Tokens (from theme.css) === */
+        :root {
+            --color-black: #000000;
+            --color-pink: #FF005E;
+            --color-pink-light: #DEB0C1;
+            --color-accent: var(--color-pink);
+            --gray-90: #1A1A1A;
+            --gray-80: #333333;
+            --gray-70: #4A4A4A;
+            --gray-60: #666666;
+            --gray-50: #808080;
+            --gray-45: #999999;
+            --gray-40: #A6A6A6;
+            --gray-35: #B3B3B3;
+            --gray-30: #CCCCCC;
+            --gray-25: #D0D0D0;
+            --gray-20: #F2F2F2;
+            --gray-15: #E8E8E8;
+            --warm-gray-20: #FAF8F8;
+            --color-white: #FFFFFF;
+            --color-background: #FFFFFF;
+            --color-text-primary: #000000;
+            --color-text-secondary: var(--gray-60);
+            --color-border-light: rgba(0, 0, 0, 0.1);
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+            --space-8: 32px;
+            --space-10: 40px;
+            --space-12: 48px;
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 9999px;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+            --text-xs: 10px;
+            --text-sm: 12px;
+            --text-base: 14px;
+            --text-lg: 16px;
+            --text-xl: 18px;
+            --text-2xl: 24px;
+            --transition-fast: 0.2s ease;
+            --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            background: var(--color-background);
+            color: var(--color-text-primary);
+            width: 700px;
+            height: 480px;
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* === Header (matching real app) === */
+        .app-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: var(--space-6) var(--space-6) 0 var(--space-8);
+            margin-bottom: var(--space-6);
+            gap: var(--space-4);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-4);
+            flex: 1;
+            padding-top: var(--space-8);
+        }
+
+        .record-button-circular {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .stop-square {
+            width: var(--space-3);
+            height: var(--space-3);
+            background-color: var(--color-white);
+            border-radius: 2px;
+        }
+
+        .header-title-group {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-1);
+        }
+
+        .recording-info-inline {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .timer-inline {
+            font-size: var(--text-lg);
+            font-weight: 500;
+            color: var(--gray-90);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .status-text-inline {
+            font-size: var(--text-base);
+            font-weight: 400;
+            color: var(--gray-70);
+        }
+
+        .visualizer-inline {
+            display: flex;
+            gap: 2px;
+            align-items: center;
+            height: var(--space-4);
+        }
+
+        .visualizer-inline .wave {
+            width: 3px;
+            height: var(--space-2);
+            background: var(--gray-40);
+            border-radius: 2px;
+            animation: wave-inline 1.5s ease-in-out infinite;
+        }
+        .visualizer-inline .wave:nth-child(2) { animation-delay: 0.2s; }
+        .visualizer-inline .wave:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes wave-inline {
+            0%, 100% { height: 8px; }
+            50% { height: 16px; }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: var(--space-4);
+        }
+
+        .header-button {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            background: var(--gray-20);
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            color: var(--gray-80);
+            cursor: pointer;
+        }
+
+        .header-icon-button {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--gray-20);
+            border: none;
+            border-radius: var(--radius-md);
+            color: var(--gray-80);
+            cursor: pointer;
+            font-size: var(--text-lg);
+        }
+
+        /* === Main Content === */
+        .app-main {
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 0 var(--space-8);
+        }
+
+        /* === Agent Feed Panel (Variant A: Inline) === */
+        .agent-feed-panel {
+            display: flex;
+            flex-direction: column;
+            border-top: 1px solid var(--color-border-light);
+            border-bottom: 1px solid var(--color-border-light);
+            margin-bottom: var(--space-4);
+            max-height: 200px;
+            background: var(--warm-gray-20);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            animation: panelSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes panelSlideIn {
+            from { max-height: 0; opacity: 0; }
+            to { max-height: 200px; opacity: 1; }
+        }
+
+        .agent-feed-panel.hidden {
+            display: none;
+        }
+
+        /* Status Bar */
+        .agent-status-bar {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4);
+            border-bottom: 1px solid var(--color-border-light);
+            min-height: 32px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--gray-35);
+            flex-shrink: 0;
+            transition: background var(--transition-fast);
+        }
+
+        .status-dot.broadcasting {
+            background: var(--color-pink);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        .status-dot.connected {
+            background: #34C759;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .status-text {
+            font-size: var(--text-xs);
+            color: var(--gray-45);
+            flex: 1;
+        }
+
+        .status-session-id {
+            font-size: var(--text-xs);
+            color: var(--gray-30);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        /* Responses Area */
+        .agent-responses {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-2) var(--space-4);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+            min-height: 0;
+        }
+
+        .agent-responses::-webkit-scrollbar {
+            width: 4px;
+        }
+        .agent-responses::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .agent-responses::-webkit-scrollbar-thumb {
+            background: var(--gray-25);
+            border-radius: 2px;
+        }
+
+        .agent-message {
+            display: flex;
+            gap: var(--space-2);
+            animation: messageIn 0.3s ease;
+        }
+
+        @keyframes messageIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .agent-message-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .agent-message-icon i {
+            font-size: 11px;
+            color: var(--color-white);
+        }
+
+        .agent-message-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .agent-message-text {
+            font-size: var(--text-sm);
+            color: var(--gray-80);
+            line-height: 1.5;
+        }
+
+        .agent-message-meta {
+            font-size: var(--text-xs);
+            color: var(--gray-40);
+            margin-top: 2px;
+        }
+
+        /* User prompt messages */
+        .user-prompt-message {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-1) var(--space-3);
+            background: var(--color-background);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            align-self: flex-end;
+            animation: messageIn 0.3s ease;
+        }
+
+        .user-prompt-message i {
+            font-size: var(--text-sm);
+            color: var(--color-pink);
+        }
+
+        .user-prompt-message span {
+            font-size: var(--text-xs);
+            color: var(--gray-60);
+        }
+
+        /* Empty state */
+        .agent-empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-6);
+            color: var(--gray-35);
+            font-size: var(--text-sm);
+            font-style: italic;
+        }
+
+        /* Prompt Section */
+        .agent-prompt-section {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4) var(--space-3);
+            border-top: 1px solid var(--color-border-light);
+        }
+
+        .prompt-chips {
+            display: flex;
+            gap: var(--space-1);
+            flex-wrap: wrap;
+        }
+
+        .prompt-btn {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: var(--space-1) var(--space-3);
+            background: var(--color-background);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            color: var(--gray-60);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .prompt-btn:hover {
+            border-color: var(--color-pink);
+            color: var(--color-pink);
+        }
+
+        .prompt-btn:active {
+            background: var(--color-pink);
+            color: var(--color-white);
+            border-color: var(--color-pink);
+        }
+
+        .prompt-btn.sent {
+            background: var(--color-pink);
+            color: var(--color-white);
+            border-color: var(--color-pink);
+            pointer-events: none;
+        }
+
+        .prompt-input-row {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        .prompt-input {
+            flex: 1;
+            padding: var(--space-1) var(--space-3);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            color: var(--color-text-primary);
+            background: var(--color-background);
+            outline: none;
+            transition: border-color var(--transition-fast);
+        }
+
+        .prompt-input::placeholder {
+            color: var(--gray-35);
+        }
+
+        .prompt-input:focus {
+            border-color: var(--color-pink);
+        }
+
+        .prompt-send-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--color-black);
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            flex-shrink: 0;
+        }
+
+        .prompt-send-btn:hover {
+            background: var(--color-pink);
+        }
+
+        .prompt-send-btn i {
+            font-size: var(--text-sm);
+            color: var(--color-white);
+        }
+
+        /* === Transcription Cards (simplified for mockup) === */
+        .transcriptions-section {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: var(--space-4);
+        }
+
+        .transcription-card {
+            background: var(--color-background);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-lg);
+            padding: var(--space-4);
+            margin-bottom: var(--space-3);
+        }
+
+        .transcription-date {
+            font-size: var(--text-xs);
+            color: var(--gray-45);
+            margin-bottom: var(--space-2);
+        }
+
+        .transcription-text {
+            font-size: var(--text-base);
+            color: var(--gray-80);
+            line-height: 1.5;
+        }
+
+        /* === Reset Button === */
+        .reset-btn {
+            position: fixed;
+            bottom: var(--space-4);
+            right: var(--space-4);
+            padding: var(--space-2) var(--space-4);
+            background: var(--gray-90);
+            color: var(--color-white);
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            cursor: pointer;
+            z-index: 100;
+            opacity: 0.7;
+            transition: opacity var(--transition-fast);
+        }
+
+        .reset-btn:hover { opacity: 1; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="header-left">
+                <button class="record-button-circular" id="recordButton">
+                    <div class="stop-square"></div>
+                </button>
+                <div class="header-title-group">
+                    <div class="recording-info-inline" id="recordingInfo">
+                        <span class="timer-inline" id="timer">00:00</span>
+                        <span class="status-text-inline" id="statusText">recording</span>
+                        <div class="visualizer-inline">
+                            <div class="wave"></div>
+                            <div class="wave"></div>
+                            <div class="wave"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="header-button">
+                    <span>Shortcuts</span>
+                    <i class="ph ph-command"></i>
+                </button>
+                <button class="header-icon-button">
+                    <i class="ph ph-notebook"></i>
+                </button>
+                <button class="header-icon-button">
+                    <i class="ph ph-gear"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="app-main">
+            <!-- Agent Feed Panel (Inline) -->
+            <div class="agent-feed-panel" id="agentPanel">
+                <div class="agent-status-bar">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-text" id="agentStatus">Initializing...</span>
+                    <span class="status-session-id" id="sessionId"></span>
+                </div>
+                <div class="agent-responses" id="agentResponses">
+                    <div class="agent-empty-state" id="emptyState">Waiting for agent messages...</div>
+                </div>
+                <div class="agent-prompt-section">
+                    <div class="prompt-chips">
+                        <button class="prompt-btn" data-prompt="summarize">
+                            <i class="ph ph-text-align-left"></i>
+                            Summarize
+                        </button>
+                        <button class="prompt-btn" data-prompt="challenge">
+                            <i class="ph ph-shield-warning"></i>
+                            Challenge
+                        </button>
+                        <button class="prompt-btn" data-prompt="ambiguities">
+                            <i class="ph ph-question"></i>
+                            Ambiguities
+                        </button>
+                        <button class="prompt-btn" data-prompt="diagram">
+                            <i class="ph ph-graph"></i>
+                            Diagram
+                        </button>
+                    </div>
+                    <div class="prompt-input-row">
+                        <input type="text" class="prompt-input" id="promptInput" placeholder="Ask the agent anything...">
+                        <button class="prompt-send-btn" id="sendBtn">
+                            <i class="ph ph-arrow-up"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transcription Cards -->
+            <div class="transcriptions-section">
+                <div class="transcription-card">
+                    <div class="transcription-date">Just now — Live transcription</div>
+                    <div class="transcription-text">...and I think the main challenge with this approach is that we need to consider the scalability implications before committing to the architecture...</div>
+                </div>
+                <div class="transcription-card">
+                    <div class="transcription-date">1 min ago</div>
+                    <div class="transcription-text">So the proposal is to use a microservices pattern with event-driven communication between the services...</div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <button class="reset-btn" id="resetBtn">Reset Simulation</button>
+
+    <script>
+        // === Simulation State ===
+        const state = {
+            phase: 'init', // init → broadcasting → awaiting → connected → streaming
+            timer: 0,
+            timerInterval: null,
+            messageInterval: null,
+            messageIndex: 0,
+            sessionId: 'ses_' + Math.random().toString(36).substr(2, 8)
+        };
+
+        // === Sample Agent Messages ===
+        const agentMessages = [
+            { text: "I'm now listening to the conversation. I'll provide insights as the discussion progresses.", meta: "Initial connection" },
+            { text: "The discussion is focusing on microservices architecture. Key consideration: event-driven patterns work well for loose coupling but add complexity to debugging distributed transactions.", meta: "Re: segment 3" },
+            { text: "Scalability concern noted. Consider: horizontal scaling of individual services is a strength of this approach, but you'll need a service mesh for observability.", meta: "Re: segment 5" },
+            { text: "Three architectural patterns mentioned so far: 1) Event sourcing 2) CQRS 3) Saga pattern. The team seems to favor event sourcing.", meta: "Summary so far" },
+            { text: "Risk identified: no one has mentioned data consistency guarantees yet. With event-driven systems, eventual consistency is the default — is that acceptable for your use case?", meta: "Re: segment 8" },
+        ];
+
+        // === DOM Elements ===
+        const statusDot = document.getElementById('statusDot');
+        const agentStatus = document.getElementById('agentStatus');
+        const sessionIdEl = document.getElementById('sessionId');
+        const agentResponses = document.getElementById('agentResponses');
+        const emptyState = document.getElementById('emptyState');
+        const timerEl = document.getElementById('timer');
+        const promptInput = document.getElementById('promptInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // === Timer ===
+        function startTimer() {
+            state.timerInterval = setInterval(() => {
+                state.timer++;
+                const mins = String(Math.floor(state.timer / 60)).padStart(2, '0');
+                const secs = String(state.timer % 60).padStart(2, '0');
+                timerEl.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        // === Status Updates ===
+        function setStatus(phase, text) {
+            state.phase = phase;
+            agentStatus.textContent = text;
+            statusDot.className = 'status-dot';
+            if (phase === 'broadcasting' || phase === 'awaiting') {
+                statusDot.classList.add('broadcasting');
+            } else if (phase === 'connected' || phase === 'streaming') {
+                statusDot.classList.add('connected');
+            }
+        }
+
+        // === Add Message ===
+        function addAgentMessage(msg) {
+            emptyState.classList.add('hidden');
+            const div = document.createElement('div');
+            div.className = 'agent-message';
+            div.innerHTML = `
+                <div class="agent-message-icon"><i class="ph ph-robot"></i></div>
+                <div class="agent-message-content">
+                    <div class="agent-message-text">${msg.text}</div>
+                    <div class="agent-message-meta">${msg.meta}</div>
+                </div>
+            `;
+            agentResponses.appendChild(div);
+            agentResponses.scrollTop = agentResponses.scrollHeight;
+        }
+
+        function addUserPrompt(text) {
+            emptyState.classList.add('hidden');
+            const div = document.createElement('div');
+            div.className = 'user-prompt-message';
+            div.innerHTML = `<i class="ph ph-user"></i><span>${text}</span>`;
+            agentResponses.appendChild(div);
+            agentResponses.scrollTop = agentResponses.scrollHeight;
+        }
+
+        // === Prompt Handlers ===
+        const promptExpansions = {
+            summarize: 'Summarize the conversation so far',
+            challenge: 'Challenge this idea — what are the counterarguments?',
+            ambiguities: 'Identify ambiguities or unclear points',
+            diagram: 'Draw a diagram of the main concepts'
+        };
+
+        document.querySelectorAll('.prompt-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const prompt = btn.dataset.prompt;
+                btn.classList.add('sent');
+                setTimeout(() => btn.classList.remove('sent'), 1500);
+                addUserPrompt(promptExpansions[prompt] || prompt);
+                // Simulate agent response after 2-3s
+                setTimeout(() => {
+                    addAgentMessage({
+                        text: `Here's my ${prompt} of the discussion so far: The team is evaluating a microservices architecture with event-driven communication. Key themes include scalability, data consistency, and service mesh observability.`,
+                        meta: `Response to: ${prompt}`
+                    });
+                }, 2000 + Math.random() * 1000);
+            });
+        });
+
+        sendBtn.addEventListener('click', sendCustomPrompt);
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendCustomPrompt();
+        });
+
+        function sendCustomPrompt() {
+            const text = promptInput.value.trim();
+            if (!text) return;
+            promptInput.value = '';
+            addUserPrompt(text);
+            setTimeout(() => {
+                addAgentMessage({
+                    text: `That's a great question. Based on the conversation, I'd say the key factor to consider is how this impacts the overall system reliability and team velocity.`,
+                    meta: `Response to custom prompt`
+                });
+            }, 2500);
+        }
+
+        // === Simulation Sequence ===
+        function runSimulation() {
+            sessionIdEl.textContent = state.sessionId;
+            startTimer();
+
+            // Phase 1: Broadcasting (immediate)
+            setStatus('broadcasting', 'Stories is broadcasting');
+
+            // Phase 2: Awaiting agent (3s)
+            setTimeout(() => {
+                setStatus('awaiting', 'Awaiting digital agent');
+            }, 3000);
+
+            // Phase 3: Agent connected (6s)
+            setTimeout(() => {
+                setStatus('connected', 'Agent connected');
+                addAgentMessage(agentMessages[0]);
+                state.messageIndex = 1;
+            }, 6000);
+
+            // Phase 4: Stream messages (every 4s after connection)
+            setTimeout(() => {
+                setStatus('streaming', 'Agent connected');
+                state.messageInterval = setInterval(() => {
+                    if (state.messageIndex < agentMessages.length) {
+                        addAgentMessage(agentMessages[state.messageIndex]);
+                        state.messageIndex++;
+                    } else {
+                        clearInterval(state.messageInterval);
+                    }
+                }, 4000);
+            }, 9000);
+        }
+
+        // === Reset ===
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            clearInterval(state.timerInterval);
+            clearInterval(state.messageInterval);
+            state.timer = 0;
+            state.messageIndex = 0;
+            timerEl.textContent = '00:00';
+            agentResponses.innerHTML = '<div class="agent-empty-state" id="emptyState">Waiting for agent messages...</div>';
+            sessionIdEl.textContent = '';
+            statusDot.className = 'status-dot';
+            agentStatus.textContent = 'Initializing...';
+            state.sessionId = 'ses_' + Math.random().toString(36).substr(2, 8);
+            document.querySelectorAll('.prompt-btn').forEach(b => b.classList.remove('sent'));
+            setTimeout(runSimulation, 500);
+        });
+
+        // Start
+        runSimulation();
+    </script>
+</body>
+</html>

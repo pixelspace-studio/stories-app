@@ -803,6 +803,11 @@
     gap: 0;
 }
 
+.setting-disabled {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
 .setting-row {
     display: flex;
     align-items: center;

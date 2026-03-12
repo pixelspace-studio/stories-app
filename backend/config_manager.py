@@ -68,7 +68,8 @@ class ConfigurationManager:
                 'auto_hide_widget': False,
                 'auto_paste': False,
                 'sound_effects_enabled': False,
-                'fluid_transcription': False
+                'fluid_transcription': False,
+                'realtime_feed': False
             },
             'shortcuts': {
                 'record_toggle': 'CommandOrControl+Shift+R',

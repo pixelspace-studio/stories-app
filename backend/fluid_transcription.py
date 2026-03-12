@@ -7,15 +7,114 @@ Two endpoints:
 """
 
 import os
+import json
 import tempfile
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from flask import request, jsonify
 
 from retry_logic import create_openai_transcription
 from audio_storage import save_temp_audio_with_metadata_safe
+from config_manager import get_default_config_manager
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# REAL-TIME FEED WRITER
+# ============================================================================
+
+FEEDS_DIR = Path(os.path.expanduser('~/Library/Application Support/Stories/feeds'))
+
+
+def _get_feed_dir(session_id):
+    """Get or create the feed directory for a session."""
+    feed_dir = FEEDS_DIR / session_id
+    feed_dir.mkdir(parents=True, exist_ok=True)
+    return feed_dir
+
+
+def _write_meta(feed_dir, session_id):
+    """Write meta.json on first segment (only if it doesn't exist yet)."""
+    meta_path = feed_dir / 'meta.json'
+    if not meta_path.exists():
+        meta = {
+            'session_id': session_id,
+            'started_at': datetime.now(timezone.utc).isoformat(),
+            'format': 'jsonl',
+            'version': 1
+        }
+        meta_path.write_text(json.dumps(meta, indent=2))
+        logger.info(f"📡 Feed meta written: {meta_path}")
+
+
+def _append_to_feed(session_id, segment_index, text, language, duration):
+    """Append a single JSONL line to the feed file (runs in background thread)."""
+    try:
+        feed_dir = _get_feed_dir(session_id)
+        _write_meta(feed_dir, session_id)
+
+        line = json.dumps({
+            'seg': segment_index,
+            't': datetime.now(timezone.utc).isoformat(),
+            'text': text,
+            'lang': language,
+            'dur': duration
+        })
+
+        feed_path = feed_dir / 'feed.jsonl'
+        with open(feed_path, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+
+        logger.info(f"📡 Feed append: session={session_id}, seg={segment_index}, chars={len(text)}")
+    except Exception as e:
+        logger.error(f"❌ Feed append error: {e}")
+
+
+def _append_session_end(session_id, total_segments, total_duration):
+    """Append session_end marker and update the 'latest' pointer."""
+    try:
+        feed_dir = _get_feed_dir(session_id)
+
+        line = json.dumps({
+            'event': 'session_end',
+            't': datetime.now(timezone.utc).isoformat(),
+            'total_segments': total_segments,
+            'total_duration': total_duration
+        })
+
+        feed_path = feed_dir / 'feed.jsonl'
+        with open(feed_path, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+
+        # Write latest pointer for easy discovery
+        latest_path = FEEDS_DIR / 'latest'
+        latest_path.write_text(session_id)
+
+        logger.info(f"📡 Feed session_end: session={session_id}, segments={total_segments}")
+    except Exception as e:
+        logger.error(f"❌ Feed session_end error: {e}")
+
+
+def append_to_feed_async(session_id, segment_index, text, language, duration):
+    """Non-blocking feed append — fires and forgets in a daemon thread."""
+    t = threading.Thread(
+        target=_append_to_feed,
+        args=(session_id, segment_index, text, language, duration),
+        daemon=True
+    )
+    t.start()
+
+
+def append_session_end_async(session_id, total_segments, total_duration):
+    """Non-blocking session_end append."""
+    t = threading.Thread(
+        target=_append_session_end,
+        args=(session_id, total_segments, total_duration),
+        daemon=True
+    )
+    t.start()
 
 
 def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_transcription_fn, DATABASE_PATH):
@@ -81,6 +180,19 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
 
                 logger.info(f"✅ Fluid chunk transcribed: session={session_id}, segment={segment_index}, "
                           f"chars={len(result.get('text', ''))}")
+
+                # Async append to real-time feed if enabled
+                config_manager = get_default_config_manager()
+                if config_manager.get_setting('ui_settings.realtime_feed', False):
+                    chunk_text = result.get("text", "")
+                    if chunk_text.strip():
+                        append_to_feed_async(
+                            session_id=session_id,
+                            segment_index=segment_index,
+                            text=chunk_text,
+                            language=result.get("language", "unknown"),
+                            duration=result.get("duration", 0)
+                        )
 
                 return jsonify({
                     "text": result.get("text", ""),
@@ -178,6 +290,15 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
             )
 
             logger.info(f"✅ Fluid transcription saved: id={transcription_id}, status={status}")
+
+            # Async append session_end marker to feed if enabled
+            config_manager = get_default_config_manager()
+            if config_manager.get_setting('ui_settings.realtime_feed', False):
+                append_session_end_async(
+                    session_id=session_id,
+                    total_segments=total_segments,
+                    total_duration=total_duration
+                )
 
             return jsonify({
                 "transcription_id": transcription_id,

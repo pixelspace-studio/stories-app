@@ -2345,6 +2345,34 @@ def update_permission_status():
         }), 500
 
 
+# ============================================================================
+# REAL-TIME FEED ENDPOINTS
+# ============================================================================
+
+from fluid_transcription import FEEDS_DIR
+
+@app.route('/api/feeds/path', methods=['GET'])
+def get_feeds_path():
+    """Return the base feeds directory path."""
+    return jsonify({"path": str(FEEDS_DIR)})
+
+
+@app.route('/api/feeds/latest', methods=['GET'])
+def get_feeds_latest():
+    """Return the latest active feed session path."""
+    latest_file = FEEDS_DIR / 'latest'
+    if latest_file.exists():
+        session_id = latest_file.read_text().strip()
+        feed_dir = FEEDS_DIR / session_id
+        return jsonify({
+            "session_id": session_id,
+            "path": str(feed_dir),
+            "feed_file": str(feed_dir / 'feed.jsonl'),
+            "exists": feed_dir.exists()
+        })
+    return jsonify({"session_id": None, "path": None}), 404
+
+
 # Register fluid transcription routes
 register_fluid_routes(
     app,
@@ -2407,6 +2435,8 @@ if __name__ == '__main__':
     print("   - POST /api/transcribe/chunk")
     print("   - POST /api/transcribe/fluid-complete")
     print("   - POST /api/transcribe/save-audio")
+    print("   - GET  /api/feeds/path")
+    print("   - GET  /api/feeds/latest")
     print("=" * 50)
     
     # Port fallback configuration

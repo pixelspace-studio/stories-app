@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=700, initial-scale=1.0">
+    <title>Variant F: Agent Takeover</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+    <style>
+        :root {
+            --color-pink: #FF005E;
+            --color-pink-light: #DEB0C1;
+            --gray-90: #1A1A1A;
+            --gray-80: #333333;
+            --gray-70: #4A4A4A;
+            --gray-60: #666666;
+            --gray-50: #808080;
+            --gray-45: #999999;
+            --gray-40: #A6A6A6;
+            --gray-35: #B3B3B3;
+            --gray-30: #CCCCCC;
+            --gray-25: #D0D0D0;
+            --gray-20: #F2F2F2;
+            --warm-gray-20: #FAF8F8;
+            --color-white: #FFFFFF;
+            --color-background: #FFFFFF;
+            --color-border-light: rgba(0,0,0,0.08);
+            --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+            --space-5: 20px; --space-6: 24px; --space-8: 32px;
+            --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px;
+            --radius-xl: 20px; --radius-full: 9999px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.1);
+            --text-xs: 10px; --text-sm: 12px; --text-base: 14px;
+            --text-lg: 16px; --text-xl: 18px; --text-2xl: 24px;
+            --transition-fast: 0.2s ease;
+            --transition-smooth: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+            background: var(--color-background);
+            color: var(--gray-90);
+            width: 700px; height: 480px;
+            overflow: hidden;
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+        }
+
+        /* === Header === */
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-3) var(--space-6);
+            border-bottom: 1px solid var(--color-border-light);
+            height: 52px;
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex; align-items: center; gap: var(--space-3);
+        }
+
+        .record-btn {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+
+        .stop-sq {
+            width: 10px; height: 10px;
+            background: var(--color-white);
+            border-radius: 2px;
+        }
+
+        .timer {
+            font-size: var(--text-base);
+            font-weight: 600;
+            font-family: 'SF Mono', monospace;
+            color: var(--gray-90);
+        }
+
+        .wave-row {
+            display: flex; gap: 2px; align-items: center;
+        }
+        .wave-row .w {
+            width: 3px; height: 6px;
+            background: var(--gray-30);
+            border-radius: 2px;
+            animation: wv 1.5s ease-in-out infinite;
+        }
+        .wave-row .w:nth-child(2) { animation-delay: 0.2s; }
+        .wave-row .w:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes wv { 0%,100% { height: 5px; } 50% { height: 14px; } }
+
+        /* Tab switcher */
+        .view-tabs {
+            display: flex;
+            gap: 2px;
+            background: var(--gray-20);
+            border-radius: var(--radius-md);
+            padding: 2px;
+        }
+
+        .tab-btn {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 4px var(--space-3);
+            border: none;
+            background: none;
+            border-radius: 6px;
+            font-size: var(--text-xs);
+            color: var(--gray-45);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+
+        .tab-btn.active {
+            background: var(--color-background);
+            color: var(--gray-80);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .tab-btn i { font-size: var(--text-sm); }
+
+        .tab-badge {
+            min-width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            color: var(--color-white);
+            font-size: 9px;
+            font-weight: 600;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 3px;
+        }
+
+        .header-right {
+            display: flex; align-items: center; gap: var(--space-2);
+        }
+
+        .icon-btn {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--gray-20);
+            border: none; border-radius: var(--radius-md);
+            color: var(--gray-60); cursor: pointer; font-size: var(--text-lg);
+        }
+
+        /* === Panels (tab views) === */
+        .panel {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel.active {
+            display: flex;
+        }
+
+        /* === AGENT PANEL === */
+        .agent-panel { }
+
+        /* Status bar */
+        .agent-statusbar {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            padding: var(--space-2) var(--space-6);
+            border-bottom: 1px solid var(--color-border-light);
+            background: var(--color-background);
+            flex-shrink: 0;
+        }
+
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--gray-25);
+            transition: background var(--transition-fast);
+        }
+
+        .status-dot.broadcasting {
+            background: var(--color-pink);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-dot.connected { background: #34C759; }
+
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+        .status-str {
+            font-size: var(--text-xs);
+            color: var(--gray-45);
+            flex: 1;
+        }
+
+        /* Prompts in status bar */
+        .statusbar-prompts {
+            display: flex;
+            gap: var(--space-2);
+        }
+
+        .s-chip {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 3px var(--space-2);
+            background: var(--color-background);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            color: var(--gray-50);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .s-chip:hover { border-color: var(--color-pink); color: var(--color-pink); }
+
+        .s-chip.firing {
+            background: var(--color-pink);
+            color: var(--color-white);
+            border-color: var(--color-pink);
+        }
+
+        /* Agent messages */
+        .agent-msgs {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-5) var(--space-8);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-6);
+        }
+
+        .agent-msgs::-webkit-scrollbar { width: 3px; }
+        .agent-msgs::-webkit-scrollbar-thumb { background: var(--gray-20); border-radius: 2px; }
+
+        .agent-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-4);
+            height: 100%;
+            text-align: center;
+        }
+
+        .agent-empty-icon {
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: var(--gray-20);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--gray-35);
+            font-size: var(--text-xl);
+        }
+
+        .agent-empty h3 {
+            font-size: var(--text-base);
+            font-weight: 500;
+            color: var(--gray-35);
+        }
+
+        .agent-empty p {
+            font-size: var(--text-sm);
+            color: var(--gray-30);
+            line-height: 1.5;
+            max-width: 260px;
+        }
+
+        /* Agent message card */
+        .agent-card {
+            display: flex;
+            gap: var(--space-4);
+            animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .a-avatar {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .a-avatar i { font-size: 14px; color: var(--color-white); }
+
+        .a-body { flex: 1; min-width: 0; }
+
+        .a-meta {
+            font-size: var(--text-xs);
+            color: var(--gray-35);
+            margin-bottom: var(--space-2);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .a-ctx-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-1);
+            background: var(--warm-gray-20);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-sm);
+            padding: 1px var(--space-2);
+            font-size: var(--text-xs);
+            color: var(--gray-40);
+        }
+
+        .a-text {
+            font-size: var(--text-base);
+            color: var(--gray-80);
+            line-height: 1.7;
+        }
+
+        /* User prompt card */
+        .user-card {
+            align-self: flex-end;
+            max-width: 75%;
+            animation: slideIn 0.3s ease;
+        }
+
+        .user-card-inner {
+            background: var(--warm-gray-20);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+            padding: var(--space-3) var(--space-4);
+        }
+
+        .user-card-label {
+            font-size: var(--text-xs);
+            color: var(--color-pink);
+            margin-bottom: var(--space-1);
+        }
+
+        .user-card-text {
+            font-size: var(--text-sm);
+            color: var(--gray-70);
+            line-height: 1.45;
+        }
+
+        /* Typing */
+        .typing {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
+            animation: slideIn 0.2s ease;
+        }
+
+        .typing .a-avatar { opacity: 0.4; }
+
+        .t-dots { display: flex; gap: 4px; align-items: center; }
+
+        .t-dots span {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--gray-25);
+            animation: blink 1.4s infinite;
+        }
+
+        .t-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .t-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
+
+        /* Input bar */
+        .agent-inputbar {
+            display: flex;
+            gap: var(--space-3);
+            padding: var(--space-3) var(--space-8);
+            border-top: 1px solid var(--color-border-light);
+            flex-shrink: 0;
+        }
+
+        .a-input {
+            flex: 1;
+            padding: var(--space-2) var(--space-4);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            font-size: var(--text-sm);
+            color: var(--gray-90);
+            background: var(--color-background);
+            outline: none;
+        }
+
+        .a-input::placeholder { color: var(--gray-30); }
+        .a-input:focus { border-color: var(--color-pink); }
+
+        .a-send {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--gray-90);
+            border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background var(--transition-fast);
+        }
+
+        .a-send:hover { background: var(--color-pink); }
+        .a-send i { font-size: var(--text-sm); color: var(--color-white); }
+
+        /* === TRANSCRIPT PANEL === */
+        .transcript-panel {
+            background: var(--warm-gray-20);
+        }
+
+        .transcript-msgs {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-5) var(--space-8);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-4);
+        }
+
+        .transcript-msgs::-webkit-scrollbar { width: 3px; }
+        .transcript-msgs::-webkit-scrollbar-thumb { background: var(--gray-20); border-radius: 2px; }
+
+        .t-block {
+            animation: slideIn 0.3s ease;
+        }
+
+        .t-block-time {
+            font-size: var(--text-xs);
+            color: var(--gray-30);
+            font-family: 'SF Mono', monospace;
+            margin-bottom: 3px;
+        }
+
+        .t-block-text {
+            font-size: var(--text-sm);
+            color: var(--gray-60);
+            line-height: 1.6;
+        }
+
+        .t-block.live .t-block-text { color: var(--gray-80); }
+        .t-block.live .t-block-time { color: var(--color-pink); }
+
+        .t-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            height: 100%;
+            color: var(--gray-30);
+        }
+
+        .t-empty i { font-size: 24px; }
+        .t-empty p { font-size: var(--text-sm); }
+
+        /* === New message notification (when on transcript tab) === */
+        .agent-notif {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--gray-90);
+            color: var(--color-white);
+            border-radius: var(--radius-full);
+            padding: var(--space-2) var(--space-4);
+            font-size: var(--text-xs);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            cursor: pointer;
+            box-shadow: var(--shadow-md);
+            z-index: 10;
+            animation: notifIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: opacity var(--transition-fast), transform var(--transition-fast);
+        }
+
+        @keyframes notifIn {
+            from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+            to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+
+        .agent-notif.hiding {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-8px);
+        }
+
+        .agent-notif i { font-size: var(--text-sm); }
+
+        .notif-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--color-pink);
+        }
+
+        .agent-notif.hidden { display: none; }
+
+        .reset-btn {
+            position: fixed;
+            bottom: var(--space-4); right: var(--space-4);
+            padding: var(--space-2) var(--space-4);
+            background: var(--gray-90); color: var(--color-white);
+            border: none; border-radius: var(--radius-md);
+            font-size: var(--text-sm); cursor: pointer;
+            z-index: 100; opacity: 0.6;
+            transition: opacity var(--transition-fast);
+        }
+        .reset-btn:hover { opacity: 1; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <header class="app-header">
+        <div class="header-left">
+            <button class="record-btn"><div class="stop-sq"></div></button>
+            <span class="timer" id="timer">00:00</span>
+            <div class="wave-row"><div class="w"></div><div class="w"></div><div class="w"></div></div>
+        </div>
+
+        <!-- Tab Switcher (center) -->
+        <div class="view-tabs">
+            <button class="tab-btn active" id="agentTab" data-panel="agent">
+                <i class="ph ph-robot"></i>
+                Agent
+                <span class="tab-badge hidden" id="agentBadge">0</span>
+            </button>
+            <button class="tab-btn" id="transcriptTab" data-panel="transcript">
+                <i class="ph ph-waveform"></i>
+                Your words
+            </button>
+        </div>
+
+        <div class="header-right">
+            <button class="icon-btn"><i class="ph ph-notebook"></i></button>
+            <button class="icon-btn"><i class="ph ph-gear"></i></button>
+        </div>
+    </header>
+
+    <!-- Agent notification (visible when on transcript tab) -->
+    <div class="agent-notif hidden" id="agentNotif">
+        <div class="notif-dot"></div>
+        <i class="ph ph-robot"></i>
+        <span id="notifText">Agent responded</span>
+    </div>
+
+    <!-- Agent Panel -->
+    <div class="panel agent-panel active" id="agentPanel">
+        <div class="agent-statusbar">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-str" id="statusStr">Connecting...</span>
+            <div class="statusbar-prompts">
+                <button class="s-chip" data-p="summarize"><i class="ph ph-text-align-left"></i> Summarize</button>
+                <button class="s-chip" data-p="challenge"><i class="ph ph-shield-warning"></i> Challenge</button>
+                <button class="s-chip" data-p="ambiguities"><i class="ph ph-question"></i> Ambiguities</button>
+                <button class="s-chip" data-p="diagram"><i class="ph ph-graph"></i> Diagram</button>
+            </div>
+        </div>
+
+        <div class="agent-msgs" id="agentMsgs">
+            <div class="agent-empty" id="emptyState">
+                <div class="agent-empty-icon"><i class="ph ph-robot"></i></div>
+                <h3>Waiting for agent</h3>
+                <p>Your words are being broadcast. The agent will respond here as you speak.</p>
+            </div>
+        </div>
+
+        <div class="agent-inputbar">
+            <input class="a-input" id="aInput" placeholder="Ask the agent anything...">
+            <button class="a-send" id="aSend"><i class="ph ph-arrow-up"></i></button>
+        </div>
+    </div>
+
+    <!-- Transcript Panel -->
+    <div class="panel transcript-panel" id="transcriptPanelEl">
+        <div class="transcript-msgs" id="transcriptMsgs">
+            <div class="t-empty" id="tEmpty">
+                <i class="ph ph-waveform"></i>
+                <p>Transcription will appear as you speak.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<button class="reset-btn" id="resetBtn">Reset</button>
+
+<script>
+const S = {
+    timer: 0, ti: null, mi: null, tmi: null,
+    msgIdx: 0, tIdx: 0,
+    activePanel: 'agent',
+    unreadCount: 0
+};
+
+const agentMsgs = [
+    {
+        ctx: 'scalability implications',
+        text: 'The scalability concern is well-placed. With event-driven microservices, the bottleneck typically shifts from compute to message broker throughput — specifically at the fan-out points. Recommend scoping Kafka vs NATS early; this decision has long-tail architectural consequences.',
+        label: 'Re: segment 1'
+    },
+    {
+        ctx: 'event-driven communication',
+        text: 'Correct direction. Hidden cost: distributed tracing becomes non-negotiable. Debugging a failed saga across 6 services without OpenTelemetry is a production nightmare. Budget this from day one, not as an afterthought.',
+        label: 'Re: segment 2'
+    },
+    {
+        ctx: null,
+        text: '**Three patterns emerging**: Event Sourcing, CQRS, and Saga. They complement each other but compound operational complexity. Critical unasked question: is this team ready to own this stack in production?',
+        label: 'Pattern summary'
+    },
+    {
+        ctx: null,
+        text: '⚠️ **Risk flag**: No mention of data consistency guarantees. With eventual consistency as the default, you need explicit decisions on read-your-writes guarantees for user-facing flows. This bites teams in months 6–9.',
+        label: 'Risk'
+    },
+];
+
+const tChunks = [
+    { t: '0:12', text: "Good morning everyone. Today we're going to discuss the backend rewrite that's been on the roadmap for Q3.", live: false },
+    { t: '1:05', text: "Let's start by reviewing the current architecture and identifying the pain points that are slowing us down.", live: false },
+    { t: '2:18', text: "So the proposal is to use a microservices pattern with event-driven communication between the services.", live: false },
+    { t: '3:30', text: "The main challenge is we need to consider the scalability implications before committing to the architecture.", live: false },
+    { t: '4:45', text: "We also need to think about how this affects the deployment pipeline and the on-call rotation.", live: true },
+];
+
+const promptMap = {
+    summarize: 'Summarize the conversation so far',
+    challenge: 'Challenge this — what are the counterarguments?',
+    ambiguities: 'What are the ambiguities or unclear points?',
+    diagram: 'Draw a diagram of the main concepts',
+};
+
+const statusDot = document.getElementById('statusDot');
+const statusStr = document.getElementById('statusStr');
+const agentMsgsEl = document.getElementById('agentMsgs');
+const transcriptMsgsEl = document.getElementById('transcriptMsgs');
+const timerEl = document.getElementById('timer');
+const aInput = document.getElementById('aInput');
+const aSend = document.getElementById('aSend');
+const agentBadge = document.getElementById('agentBadge');
+const agentNotif = document.getElementById('agentNotif');
+const notifText = document.getElementById('notifText');
+const agentTab = document.getElementById('agentTab');
+const transcriptTab = document.getElementById('transcriptTab');
+const agentPanelEl = document.getElementById('agentPanel');
+const transcriptPanelEl = document.getElementById('transcriptPanelEl');
+
+// Tab switching
+function switchPanel(panel) {
+    S.activePanel = panel;
+    if (panel === 'agent') {
+        agentPanelEl.classList.add('active');
+        transcriptPanelEl.classList.remove('active');
+        agentTab.classList.add('active');
+        transcriptTab.classList.remove('active');
+        // Clear unread
+        S.unreadCount = 0;
+        agentBadge.textContent = '0';
+        agentBadge.classList.add('hidden');
+        agentNotif.classList.add('hidden');
+    } else {
+        transcriptPanelEl.classList.add('active');
+        agentPanelEl.classList.remove('active');
+        transcriptTab.classList.add('active');
+        agentTab.classList.remove('active');
+    }
+}
+
+agentTab.addEventListener('click', () => switchPanel('agent'));
+transcriptTab.addEventListener('click', () => switchPanel('transcript'));
+agentNotif.addEventListener('click', () => switchPanel('agent'));
+
+function setStatus(phase, text) {
+    statusStr.textContent = text;
+    statusDot.className = 'status-dot';
+    if (phase === 'b' || phase === 'a') statusDot.classList.add('broadcasting');
+    else if (phase === 'c') statusDot.classList.add('connected');
+}
+
+function showNotif(text) {
+    notifText.textContent = text;
+    agentNotif.classList.remove('hidden', 'hiding');
+    setTimeout(() => {
+        agentNotif.classList.add('hiding');
+        setTimeout(() => agentNotif.classList.add('hidden'), 300);
+    }, 4000);
+}
+
+function addAgentMsg(msg) {
+    document.getElementById('emptyState')?.remove();
+    const typing = document.createElement('div');
+    typing.className = 'typing';
+    typing.innerHTML = `<div class="a-avatar" style="opacity:0.4"><i class="ph ph-robot"></i></div><div class="t-dots"><span></span><span></span><span></span></div>`;
+    agentMsgsEl.appendChild(typing);
+    agentMsgsEl.scrollTop = agentMsgsEl.scrollHeight;
+
+    setTimeout(() => {
+        typing.remove();
+        const div = document.createElement('div');
+        div.className = 'agent-card';
+        div.innerHTML = `
+            <div class="a-avatar"><i class="ph ph-robot"></i></div>
+            <div class="a-body">
+                <div class="a-meta">
+                    ${msg.label}
+                    ${msg.ctx ? `<span class="a-ctx-tag"><i class="ph ph-quotes"></i>${msg.ctx}</span>` : ''}
+                </div>
+                <div class="a-text">${msg.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
+            </div>
+        `;
+        agentMsgsEl.appendChild(div);
+        agentMsgsEl.scrollTop = agentMsgsEl.scrollHeight;
+
+        // If on transcript tab, show badge + notif
+        if (S.activePanel === 'transcript') {
+            S.unreadCount++;
+            agentBadge.textContent = S.unreadCount;
+            agentBadge.classList.remove('hidden');
+            showNotif('Agent responded');
+        }
+    }, 1000 + Math.random() * 600);
+}
+
+function addUserCard(text) {
+    document.getElementById('emptyState')?.remove();
+    const div = document.createElement('div');
+    div.className = 'user-card';
+    div.innerHTML = `
+        <div class="user-card-inner">
+            <div class="user-card-label">You</div>
+            <div class="user-card-text">${text}</div>
+        </div>
+    `;
+    agentMsgsEl.appendChild(div);
+    agentMsgsEl.scrollTop = agentMsgsEl.scrollHeight;
+}
+
+function addTranscriptBlock(chunk) {
+    document.getElementById('tEmpty')?.remove();
+    const div = document.createElement('div');
+    div.className = 't-block' + (chunk.live ? ' live' : '');
+    div.innerHTML = `<div class="t-block-time">${chunk.t}</div><div class="t-block-text">${chunk.text}</div>`;
+    transcriptMsgsEl.appendChild(div);
+    transcriptMsgsEl.scrollTop = transcriptMsgsEl.scrollHeight;
+}
+
+document.querySelectorAll('.s-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const text = promptMap[btn.dataset.p];
+        btn.classList.add('firing');
+        setTimeout(() => btn.classList.remove('firing'), 1200);
+        addUserCard(text);
+        setTimeout(() => addAgentMsg({
+            ctx: null,
+            text: 'The discussion centers on event-driven microservices. Key themes: scalability, operational complexity, data consistency. Biggest gap: no alignment on consistency guarantees yet.',
+            label: `Response: ${btn.dataset.p}`
+        }), 800);
+    });
+});
+
+aSend.addEventListener('click', send);
+aInput.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+
+function send() {
+    const t = aInput.value.trim();
+    if (!t) return;
+    aInput.value = '';
+    addUserCard(t);
+    setTimeout(() => addAgentMsg({
+        ctx: null,
+        text: 'Based on the discussion, the core tradeoff is operational simplicity vs. system resilience. The proposal optimizes for resilience at significant complexity cost. Worth pressure-testing against the team\'s operational readiness.',
+        label: 'Custom'
+    }), 800);
+}
+
+function startTimer() {
+    S.ti = setInterval(() => {
+        S.timer++;
+        timerEl.textContent = `${String(Math.floor(S.timer/60)).padStart(2,'0')}:${String(S.timer%60).padStart(2,'0')}`;
+    }, 1000);
+}
+
+function runSim() {
+    startTimer();
+    setStatus('b', 'Stories is broadcasting');
+
+    // Transcript chunks stream
+    S.tmi = setInterval(() => {
+        if (S.tIdx < tChunks.length) addTranscriptBlock(tChunks[S.tIdx++]);
+        else clearInterval(S.tmi);
+    }, 2200);
+
+    setTimeout(() => setStatus('a', 'Awaiting digital agent'), 3000);
+
+    setTimeout(() => {
+        setStatus('c', 'Agent connected');
+        addAgentMsg(agentMsgs[0]);
+        S.msgIdx = 1;
+    }, 6000);
+
+    setTimeout(() => {
+        S.mi = setInterval(() => {
+            if (S.msgIdx < agentMsgs.length) addAgentMsg(agentMsgs[S.msgIdx++]);
+            else clearInterval(S.mi);
+        }, 5000);
+    }, 10000);
+}
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    [S.ti, S.mi, S.tmi].forEach(clearInterval);
+    S.timer = 0; S.msgIdx = 0; S.tIdx = 0; S.unreadCount = 0;
+    timerEl.textContent = '00:00';
+    agentMsgsEl.innerHTML = `<div class="agent-empty" id="emptyState"><div class="agent-empty-icon"><i class="ph ph-robot"></i></div><h3>Waiting for agent</h3><p>Your words are being broadcast. The agent will respond here as you speak.</p></div>`;
+    transcriptMsgsEl.innerHTML = `<div class="t-empty" id="tEmpty"><i class="ph ph-waveform"></i><p>Transcription will appear as you speak.</p></div>`;
+    statusDot.className = 'status-dot';
+    statusStr.textContent = 'Connecting...';
+    agentBadge.classList.add('hidden');
+    agentNotif.classList.add('hidden');
+    switchPanel('agent');
+    setTimeout(runSim, 400);
+});
+
+runSim();
+</script>
+</body>
+</html>
