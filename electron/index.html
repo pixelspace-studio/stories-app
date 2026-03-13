@@ -58,6 +58,42 @@
         </header>
         
         <main class="app-main">
+            <!-- Agent Feed Panel (split view: agent left, Your Story right) -->
+            <div id="agentFeedPanel" class="agent-feed-panel hidden">
+                <!-- Left: Agent column -->
+                <div class="agent-col">
+                    <div class="agent-col-header">
+                        <div class="agent-status-dot" id="agentStatusDot"></div>
+                        <span class="agent-status-text" id="agentStatusText">Broadcasting...</span>
+                        <button class="agent-copy-path-btn" id="agentCopyPathBtn">
+                            <i class="ph ph-copy"></i> Copy feed path
+                        </button>
+                    </div>
+                    <div class="agent-messages" id="agentMessages"></div>
+                    <div class="agent-prompt-area">
+                        <div class="agent-chips" id="agentChips">
+                            <button class="agent-chip" data-prompt="summarize">Summarize</button>
+                            <button class="agent-chip" data-prompt="challenge">Challenge</button>
+                            <button class="agent-chip" data-prompt="ambiguities">Ambiguities</button>
+                        </div>
+                        <div class="agent-input-row">
+                            <textarea id="agentInput" class="agent-input" placeholder="Ask the agent..." rows="1"></textarea>
+                            <button id="agentSendBtn" class="agent-send-btn">
+                                <i class="ph ph-arrow-up"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Right: Your Story column (live chunks, collapsible) -->
+                <div class="story-col" id="storyCol">
+                    <div class="story-col-header" id="storyToggle">
+                        <span class="story-col-title">Your Story</span>
+                        <i class="ph ph-caret-right story-col-chevron"></i>
+                    </div>
+                    <div class="story-col-feed" id="storyColFeed"></div>
+                </div>
+            </div>
+
             <!-- Recent Transcriptions Section -->
             <div class="transcriptions-section">
                 <h2 class="section-title hidden">Recent transcriptions</h2>
@@ -176,7 +212,6 @@
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <a href="#" class="setting-link-secondary" id="copyFeedPathButton">Copy feed path</a>
                 </div>
 
                 <!-- Auto-hide Widget Toggle -->

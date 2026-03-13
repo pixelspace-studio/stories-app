@@ -43,7 +43,8 @@ def _write_meta(feed_dir, session_id):
             'session_id': session_id,
             'started_at': datetime.now(timezone.utc).isoformat(),
             'format': 'jsonl',
-            'version': 1
+            'version': 2,
+            'files': {'stories': 'stories-feed.jsonl', 'agent': 'agent-feed.jsonl'}
         }
         meta_path.write_text(json.dumps(meta, indent=2))
         logger.info(f"📡 Feed meta written: {meta_path}")
@@ -63,7 +64,7 @@ def _append_to_feed(session_id, segment_index, text, language, duration):
             'dur': duration
         })
 
-        feed_path = feed_dir / 'feed.jsonl'
+        feed_path = feed_dir / 'stories-feed.jsonl'
         with open(feed_path, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
 
@@ -84,7 +85,7 @@ def _append_session_end(session_id, total_segments, total_duration):
             'total_duration': total_duration
         })
 
-        feed_path = feed_dir / 'feed.jsonl'
+        feed_path = feed_dir / 'stories-feed.jsonl'
         with open(feed_path, 'a', encoding='utf-8') as f:
             f.write(line + '\n')
 

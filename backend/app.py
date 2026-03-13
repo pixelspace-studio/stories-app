@@ -11,7 +11,8 @@ import time
 VERSION = "0.9.8"
 import tempfile
 import sqlite3
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, after_this_request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -2367,10 +2368,69 @@ def get_feeds_latest():
         return jsonify({
             "session_id": session_id,
             "path": str(feed_dir),
-            "feed_file": str(feed_dir / 'feed.jsonl'),
+            "stories_feed": str(feed_dir / 'stories-feed.jsonl'),
+            "agent_feed": str(feed_dir / 'agent-feed.jsonl'),
             "exists": feed_dir.exists()
         })
     return jsonify({"session_id": None, "path": None}), 404
+
+
+@app.route('/api/feeds/start', methods=['POST'])
+def start_feed_session():
+    """Register a new feed session immediately when recording starts."""
+    data = request.get_json()
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    feed_dir = FEEDS_DIR / session_id
+    feed_dir.mkdir(parents=True, exist_ok=True)
+    # Write latest pointer immediately
+    (FEEDS_DIR / 'latest').write_text(session_id)
+    logger.info(f"📡 Feed session started: {session_id}")
+    return jsonify({'ok': True, 'path': str(feed_dir), 'session_id': session_id})
+
+
+@app.route('/api/feeds/agent', methods=['GET'])
+def get_agent_feed():
+    offset = int(request.args.get('offset', 0))
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'lines': [], 'offset': offset, 'session_id': None})
+    session_id = latest_file.read_text().strip()
+    agent_feed = FEEDS_DIR / session_id / 'agent-feed.jsonl'
+    if not agent_feed.exists():
+        return jsonify({'lines': [], 'offset': offset, 'session_id': session_id})
+    with open(agent_feed, 'r', encoding='utf-8') as f:
+        all_lines = f.readlines()
+    new_lines = all_lines[offset:]
+    parsed = []
+    for line in new_lines:
+        line = line.strip()
+        if line:
+            try:
+                parsed.append(json.loads(line))
+            except Exception:
+                pass
+    return jsonify({'lines': parsed, 'offset': offset + len(new_lines), 'session_id': session_id})
+
+
+@app.route('/api/feeds/prompt', methods=['POST'])
+def post_feed_prompt():
+    data = request.get_json()
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'user_prompt',
+        't': datetime.now(timezone.utc).isoformat(),
+        'prompt': data.get('prompt', ''),
+        'text': data.get('text', '')
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
 
 
 # Register fluid transcription routes

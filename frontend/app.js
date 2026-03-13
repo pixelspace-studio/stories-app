@@ -72,12 +72,20 @@ class VoiceToTextApp {
         this.fluidTranscription = null;  // Initialized after API ready
         this.isFluidEnabled = false;     // Loaded from settings
         this._fluidStopping = false;     // Guard flag for onstop handler
+
+        // Agent Feed (v2)
+        this.isRealtimeFeedEnabled = false;
+        this.agentFeedInterval = null;
+        this.agentFeedOffset = 0;
+        this.agentConnected = false;
+        this.agentSessionPath = null;
+        this._lastAgentPrompt = null;
         
         // 🔧 Recording configuration (received from main process)
         // These values are set by main.js to keep main window and widget in sync
         this.MAX_RECORDING_MINUTES = 20; // Default, will be overridden by config
         this.WARNING_AT_MINUTES = 15; // Default, will be overridden by config
-        this.LONG_RECORDING_MINUTES = 5; // Default, will be overridden by config
+        this.LONG_RECORDING_MINUTES = 12; // Default, will be overridden by config
         
         // 🎯 Progress indicator threshold for main window (in seconds)
         // Show phase descriptions (Uploading → Transcribing → Almost done) for audio >= this threshold
@@ -824,13 +832,10 @@ class VoiceToTextApp {
             });
         }
 
-        // Copy Feed Path button
-        if (this.copyFeedPathButton) {
-            this.copyFeedPathButton.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.copyFeedPath();
-            });
-        }
+        // Copy Feed Path button (now lives in agent panel header)
+        document.getElementById('agentCopyPathBtn')?.addEventListener('click', () => {
+            this.copyFeedPath();
+        });
 
         // Cleanup Audio link
         if (this.cleanupAudioButton) {
@@ -902,6 +907,60 @@ class VoiceToTextApp {
                 }
             });
         }
+
+        // Agent chips
+        document.querySelectorAll('.agent-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!this.agentFeedInterval) return; // only during recording
+                btn.classList.add('firing');
+                setTimeout(() => btn.classList.remove('firing'), 1200);
+                this.sendAgentPrompt(btn.dataset.prompt);
+            });
+        });
+
+        // Agent input
+        const agentInput = document.getElementById('agentInput');
+        const agentChips = document.getElementById('agentChips');
+
+        if (agentInput) {
+            agentInput.addEventListener('focus', () => agentChips?.classList.add('hidden-chips'));
+            agentInput.addEventListener('blur', () => {
+                if (!agentInput.value.trim()) agentChips?.classList.remove('hidden-chips');
+            });
+            agentInput.addEventListener('input', () => {
+                agentInput.style.height = '28px';
+                agentInput.style.height = Math.min(agentInput.scrollHeight, 72) + 'px';
+            });
+            agentInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const t = agentInput.value.trim();
+                    if (!t || !this.agentFeedInterval) return;
+                    agentInput.value = '';
+                    agentInput.style.height = '28px';
+                    agentChips?.classList.remove('hidden-chips');
+                    this.sendAgentPrompt(t);
+                }
+            });
+        }
+
+        // Agent send button
+        const agentSendBtn = document.getElementById('agentSendBtn');
+        if (agentSendBtn && agentInput) {
+            agentSendBtn.addEventListener('click', () => {
+                const t = agentInput.value.trim();
+                if (!t || !this.agentFeedInterval) return;
+                agentInput.value = '';
+                agentInput.style.height = '28px';
+                agentChips?.classList.remove('hidden-chips');
+                this.sendAgentPrompt(t);
+            });
+        }
+
+        // Story col toggle
+        document.getElementById('storyToggle')?.addEventListener('click', () => {
+            document.getElementById('storyCol')?.classList.toggle('collapsed');
+        });
     }
 
     async checkBackendConnection() {
@@ -981,6 +1040,8 @@ class VoiceToTextApp {
     async startRecording() {
         // Refresh fluid setting from backend before each recording
         await this.loadFluidTranscriptionSetting();
+        await this.loadRealtimeFeedSetting();
+        this.hideAgentPanel(); // reset panel for new session
 
         // Check if API key is configured
         if (!this.hasApiKey) {
@@ -1049,6 +1110,10 @@ class VoiceToTextApp {
             if (this.isFluidEnabled && this.fluidTranscription) {
                 console.log('🔄 Main: Starting fluid transcription...');
                 this.fluidTranscription.start(stream);
+                if (this.isRealtimeFeedEnabled) {
+                    this.fluidTranscription.onSegment = (text, idx) => this._addStoryChunk(text, idx);
+                    this.startAgentFeedPolling(this.fluidTranscription.sessionId);
+                }
             } else {
                 console.log('🔄 Main: Fluid OFF — using classic mode');
             }
@@ -1175,6 +1240,9 @@ class VoiceToTextApp {
             if (window.electronAPI && window.electronAPI.syncRecordingState) {
                 window.electronAPI.syncRecordingState('main_recording_stopped');
             }
+
+            // Stop agent feed polling
+            this.stopAgentFeedPolling();
 
             // If fluid was active, handle fluid stop flow
             if (fluidActive) {
@@ -3728,12 +3796,14 @@ class VoiceToTextApp {
                 const data = await response.json();
                 const isEnabled = data.value || false;
                 console.log('📡 Current real-time feed setting:', isEnabled);
+                this.isRealtimeFeedEnabled = isEnabled;
                 if (this.realtimeFeedToggle) {
                     this.realtimeFeedToggle.checked = isEnabled;
                 }
             }
         } catch (error) {
             console.error('❌ Error loading real-time feed setting:', error);
+            this.isRealtimeFeedEnabled = false;
         }
     }
 
@@ -3754,11 +3824,11 @@ class VoiceToTextApp {
 
     async copyFeedPath() {
         try {
-            const response = await fetch(`${this.backendUrl}/api/feeds/path`);
-            if (response.ok) {
-                const data = await response.json();
-                await navigator.clipboard.writeText(data.path);
-                this.showToast('Feed path copied to clipboard', 'success');
+            const path = this.agentSessionPath;
+            if (path) {
+                const sessionId = path.split('/').pop();
+                await navigator.clipboard.writeText(`Listen to this feed: ${sessionId}`);
+                this.showToast('Feed path copied', 'success');
             }
         } catch (error) {
             console.error('❌ Error copying feed path:', error);
@@ -3846,6 +3916,7 @@ class VoiceToTextApp {
                 // Update UI
                 this.updateUIForIdle();
                 await this.loadTranscriptionHistory();
+                this.hideAgentPanel();
 
                 // Auto-paste
                 this.attemptAutoPaste(completeData.text);
@@ -3861,6 +3932,7 @@ class VoiceToTextApp {
         } catch (error) {
             console.error('❌ Fluid stop error:', error);
             this.updateUIForIdle();
+            this.hideAgentPanel();
             this.showToast('Error processing fluid transcription. Please try again.', 'error');
             await this.loadTranscriptionHistory();
 
@@ -4074,6 +4146,164 @@ class VoiceToTextApp {
                 }
             });
         }
+    }
+
+    // --- Agent Feed Panel (v2) ---
+
+    showAgentPanel() {
+        const panel = document.getElementById('agentFeedPanel');
+        if (panel) panel.classList.remove('hidden');
+        document.querySelector('.transcriptions-section')?.classList.add('hidden');
+    }
+
+    hideAgentPanel() {
+        const panel = document.getElementById('agentFeedPanel');
+        if (panel) {
+            panel.classList.add('hidden');
+            document.querySelector('.transcriptions-section')?.classList.remove('hidden');
+            this.agentFeedOffset = 0;
+            this.agentConnected = false;
+            this.agentSessionPath = null;
+            const msgs = document.getElementById('agentMessages');
+            if (msgs) msgs.innerHTML = '';
+            const feed = document.getElementById('storyColFeed');
+            if (feed) feed.innerHTML = '';
+            const storyCol = document.getElementById('storyCol');
+            if (storyCol) storyCol.classList.remove('collapsed');
+            this._updateAgentStatus('idle');
+        }
+    }
+
+    async startAgentFeedPolling(sessionId) {
+        this.agentFeedOffset = 0;
+        this.agentConnected = false;
+        this.agentSessionPath = null;
+        this.showAgentPanel();
+        this._updateAgentStatus('broadcasting');
+        // Register session immediately so latest pointer is set now
+        try {
+            const res = await fetch(`${this.backendUrl}/api/feeds/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                this.agentSessionPath = data.path;
+            }
+        } catch (e) {
+            console.warn('Feed start error:', e);
+        }
+        this.agentFeedInterval = setInterval(() => this._pollAgentFeed(), 5000);
+    }
+
+    stopAgentFeedPolling() {
+        if (this.agentFeedInterval) {
+            clearInterval(this.agentFeedInterval);
+            this.agentFeedInterval = null;
+        }
+        // Panel stays visible after recording stops — hides on next startRecording()
+    }
+
+    async _pollAgentFeed() {
+        try {
+            const res = await fetch(`${this.backendUrl}/api/feeds/agent?offset=${this.agentFeedOffset}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.lines && data.lines.length > 0) {
+                if (!this.agentConnected) {
+                    this.agentConnected = true;
+                    this._updateAgentStatus('connected');
+                }
+                data.lines.forEach(line => this._renderAgentLine(line));
+                this.agentFeedOffset = data.offset;
+            } else if (!this.agentConnected) {
+                this._updateAgentStatus('awaiting');
+            }
+        } catch (e) {
+            console.warn('Agent feed poll error:', e);
+        }
+    }
+
+    _renderAgentLine(line) {
+        const container = document.getElementById('agentMessages');
+        if (!container) return;
+        const label = this._lastAgentPrompt
+            ? `Claude · ${this._lastAgentPrompt}`
+            : (line.label || line.type || 'Agent');
+        this._lastAgentPrompt = null;
+        const div = document.createElement('div');
+        div.className = 'agent-msg';
+        div.innerHTML = `
+            <div class="agent-msg-avatar"><i class="ph ph-robot"></i></div>
+            <div class="agent-msg-body">
+                <div class="agent-msg-label">${label}</div>
+                ${line.ctx ? `<div class="agent-msg-ctx">${(line.ctx || '').replace(/\n/g, '<br>')}</div>` : ''}
+                <div class="agent-msg-text">${(line.text || '').replace(/\n/g, '<br>')}</div>
+            </div>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    _addStoryChunk(text, idx) {
+        const feed = document.getElementById('storyColFeed');
+        if (!feed) return;
+        feed.querySelectorAll('.story-chunk.live').forEach(el => el.classList.remove('live'));
+        const div = document.createElement('div');
+        div.className = 'story-chunk live';
+        const elapsed = this.timer ? this.timer.textContent : '00:00';
+        div.innerHTML = `<span class="story-chunk-time">${elapsed}</span><span class="story-chunk-text">${text}</span>`;
+        feed.appendChild(div);
+        feed.scrollTop = feed.scrollHeight;
+    }
+
+    async sendAgentPrompt(promptKey) {
+        const promptMap = {
+            summarize: 'Summarize the conversation so far',
+            challenge: 'Challenge this idea — what are the counterarguments?',
+            ambiguities: 'Identify ambiguities or unclear points in what was said',
+        };
+        const text = promptMap[promptKey] || promptKey;
+        const labelMap = {
+            summarize: 'Summarize',
+            challenge: 'Challenge',
+            ambiguities: 'Ambiguities',
+        };
+        this._lastAgentPrompt = labelMap[promptKey] || promptKey;
+        const container = document.getElementById('agentMessages');
+        if (container) {
+            const div = document.createElement('div');
+            div.className = 'agent-user-prompt';
+            div.innerHTML = `<div class="agent-user-prompt-label">You</div><div class="agent-user-prompt-text">${text}</div>`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: promptKey, text })
+            });
+        } catch (e) {
+            console.warn('Prompt send error:', e);
+        }
+    }
+
+    _updateAgentStatus(phase) {
+        const dot = document.getElementById('agentStatusDot');
+        const txt = document.getElementById('agentStatusText');
+        if (!dot || !txt) return;
+        dot.className = 'agent-status-dot';
+        const labels = {
+            idle: '',
+            broadcasting: 'Broadcasting...',
+            awaiting: 'Awaiting digital agent',
+            connected: 'Agent connected'
+        };
+        txt.textContent = labels[phase] || '';
+        if (phase === 'broadcasting' || phase === 'awaiting') dot.classList.add('broadcasting');
+        else if (phase === 'connected') dot.classList.add('connected');
     }
 }
 

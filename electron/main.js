@@ -126,7 +126,7 @@ const RECORDING_CONFIG = {
   WARNING_MINUTES: 15,
   
   // Show "long recording" notice at this time (in minutes)
-  LONG_RECORDING_MINUTES: 5
+  LONG_RECORDING_MINUTES: 12
 };
 
 // For quick testing, uncomment these lines:
@@ -213,6 +213,8 @@ function createMainWindow() {
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error(`❌ Failed to load page: ${errorCode} - ${errorDescription}`);
   });
+
+  mainWindow.setContentProtection(true);
 
   // CRITICAL: Prevent window from closing - minimize to Dock instead
   // User can click on minimized window in Dock to restore
@@ -310,6 +312,8 @@ async function createWidgetWindow(shouldHide = false) {
     roundedCorners: true,
     hasShadow: true
   });
+
+  widgetWindow.setContentProtection(true);
 
   // Create a simple widget HTML file
   const widgetHtmlPath = path.join(__dirname, 'widget.html');

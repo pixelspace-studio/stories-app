@@ -37,6 +37,7 @@ class FluidTranscriptionManager {
 
         // Callbacks
         this._onSegmentTranscribed = null;
+        this.onSegment = null; // callback(text, segmentIndex)
     }
 
     /**
@@ -211,6 +212,15 @@ class FluidTranscriptionManager {
         // Downsample to 16kHz mono
         const downsampled = this._downsample(rawSamples, sourceSampleRate, this.targetSampleRate);
 
+        // Silence detection: skip chunk if RMS energy is below threshold
+        // Prevents Whisper hallucinations on silent audio
+        const rms = this._calculateRMS(downsampled);
+        const SILENCE_THRESHOLD = 0.01; // ~-40dB, well below normal speech
+        if (rms < SILENCE_THRESHOLD) {
+            console.log(`🔇 Fluid: chunk skipped (silence detected, RMS=${rms.toFixed(4)})`);
+            return;
+        }
+
         // Encode as WAV
         const wavBlob = this._encodeWAV(downsampled, this.targetSampleRate);
 
@@ -252,6 +262,9 @@ class FluidTranscriptionManager {
             });
 
             console.log(`✅ Fluid chunk ${segmentIndex} transcribed: "${(result.text || '').substring(0, 50)}..."`);
+
+            // Fire onSegment callback (for agent feed panel)
+            if (this.onSegment) this.onSegment(result.text, segmentIndex);
 
             // Fire callback
             if (this._onSegmentTranscribed) {
@@ -363,6 +376,18 @@ class FluidTranscriptionManager {
         for (let i = 0; i < string.length; i++) {
             view.setUint8(offset + i, string.charCodeAt(i));
         }
+    }
+
+    /**
+     * Calculate RMS (root mean square) energy of audio samples.
+     * Returns a value 0.0–1.0. Silent audio is near 0.
+     */
+    _calculateRMS(samples) {
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) {
+            sum += samples[i] * samples[i];
+        }
+        return Math.sqrt(sum / samples.length);
     }
 
     /**
