@@ -1789,7 +1789,7 @@ class VoiceToTextApp {
             
             // Different message based on API key status
             const emptyMessage = this.hasApiKey 
-                ? 'Click the microphone to record your first transcription'
+                ? 'Click the microphone to start telling your story.'
                 : 'Start recording, but first <a href="#" class="empty-state-link" id="emptyStateApiKeyLink">add your API key</a>';
             
             this.transcriptionsContainer.innerHTML = `
@@ -4569,10 +4569,8 @@ class VoiceToTextApp {
             card.className = `agent-mode-card${mode.id === this.selectedModeId ? ' selected' : ''}`;
             card.dataset.modeId = mode.id;
             card.innerHTML = `
-                <div class="agent-mode-card-name">
-                    ${mode.name}
-                    <span class="agent-mode-badge ${mode.proactive ? 'proactive' : ''}">${mode.proactive ? 'proactive' : 'reactive'}</span>
-                </div>
+                <div class="agent-mode-card-name">${mode.name}</div>
+                <span class="agent-mode-badge ${mode.proactive ? 'proactive' : ''}">${mode.proactive ? 'proactive' : 'reactive'}</span>
                 <div class="agent-mode-card-desc">${mode.description}</div>
             `;
             card.addEventListener('click', () => {
