@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setAutoHideWidget: (isEnabled) => ipcRenderer.invoke('set-auto-hide-widget', isEnabled),
     setAutoPaste: (isEnabled) => ipcRenderer.invoke('set-auto-paste', isEnabled),
     setInstantRecording: (isEnabled) => ipcRenderer.invoke('set-instant-recording', isEnabled),
+    setRealtimeActive: (isActive) => ipcRenderer.invoke('set-realtime-active', isActive),
     updateApiKeyCache: (hasKey) => ipcRenderer.invoke('update-api-key-cache', hasKey),
     onInstantRecordingChanged: (callback) => ipcRenderer.on('instant-recording-changed', callback),
     syncRecordingState: (message) => ipcRenderer.invoke('sync-recording-state', message),

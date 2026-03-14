@@ -2351,6 +2351,58 @@ def update_permission_status():
 # ============================================================================
 
 from fluid_transcription import FEEDS_DIR
+from pathlib import Path as _Path
+
+
+@app.route('/api/agent-modes', methods=['GET'])
+def get_agent_modes():
+    """Read all .md files from agent-modes/ dir, parse frontmatter + body."""
+    modes_dir = _Path(__file__).parent.parent / 'agent-modes'
+    modes = []
+    if modes_dir.exists():
+        for f in sorted(modes_dir.glob('*.md')):
+            text = f.read_text(encoding='utf-8')
+            parts = text.split('---', 2)
+            if len(parts) >= 3:
+                meta = {}
+                for line in parts[1].strip().split('\n'):
+                    if ':' in line:
+                        k, v = line.split(':', 1)
+                        k, v = k.strip(), v.strip()
+                        if v.lower() == 'true': v = True
+                        elif v.lower() == 'false': v = False
+                        meta[k] = v
+                modes.append({
+                    'id': f.stem,
+                    'name': meta.get('name', f.stem),
+                    'description': meta.get('description', ''),
+                    'proactive': meta.get('proactive', False),
+                    'prompt': parts[2].strip()
+                })
+    return jsonify({'modes': modes})
+
+
+@app.route('/api/feeds/mode', methods=['POST'])
+def post_feed_mode():
+    """Write mode event as first line of stories-feed.jsonl."""
+    data = request.get_json()
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    feed_dir = FEEDS_DIR / session_id
+    feed_dir.mkdir(parents=True, exist_ok=True)
+    stories_feed = feed_dir / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'mode',
+        't': datetime.now(timezone.utc).isoformat(),
+        'name': data.get('name', ''),
+        'prompt': data.get('prompt', ''),
+        'proactive': data.get('proactive', False)
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
 
 @app.route('/api/feeds/path', methods=['GET'])
 def get_feeds_path():
@@ -2427,6 +2479,76 @@ def post_feed_prompt():
         't': datetime.now(timezone.utc).isoformat(),
         'prompt': data.get('prompt', ''),
         'text': data.get('text', '')
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/pause', methods=['POST'])
+def post_feed_pause():
+    """Write pause event to stories-feed.jsonl."""
+    data = request.get_json()
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'pause',
+        't': datetime.now(timezone.utc).isoformat(),
+        'elapsed': data.get('elapsed', 0)
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/resume', methods=['POST'])
+def post_feed_resume():
+    """Write resume event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'resume',
+        't': datetime.now(timezone.utc).isoformat()
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/agent-mute', methods=['POST'])
+def post_feed_agent_mute():
+    """Write agent_muted event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'agent_muted',
+        't': datetime.now(timezone.utc).isoformat()
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/agent-unmute', methods=['POST'])
+def post_feed_agent_unmute():
+    """Write agent_unmuted event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'agent_unmuted',
+        't': datetime.now(timezone.utc).isoformat()
     })
     with open(stories_feed, 'a', encoding='utf-8') as f:
         f.write(line + '\n')

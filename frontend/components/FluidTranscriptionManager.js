@@ -34,6 +34,7 @@ class FluidTranscriptionManager {
         this.segments = [];        // Array of { index, text, status, language, duration }
         this.pendingChunks = [];   // Promises for in-flight transcriptions
         this._active = false;
+        this._paused = false;
 
         // Callbacks
         this._onSegmentTranscribed = null;
@@ -98,6 +99,42 @@ class FluidTranscriptionManager {
             this._active = false;
             this._cleanup();
         }
+    }
+
+    /**
+     * Pause fluid transcription.
+     * Flushes current buffer, stops chunk timer, but keeps AudioContext alive.
+     */
+    pause() {
+        if (!this._active || this._paused) return;
+        this._paused = true;
+
+        // Stop chunk timer
+        if (this.chunkTimer) {
+            clearInterval(this.chunkTimer);
+            this.chunkTimer = null;
+        }
+
+        // Flush current buffer
+        this._sendChunk();
+
+        console.log('⏸ Fluid transcription paused');
+    }
+
+    /**
+     * Resume fluid transcription after pause.
+     * Restarts the chunk timer.
+     */
+    resume() {
+        if (!this._active || !this._paused) return;
+        this._paused = false;
+
+        // Restart chunk timer
+        this.chunkTimer = setInterval(() => {
+            this._sendChunk();
+        }, this.chunkDurationSec * 1000);
+
+        console.log('▶ Fluid transcription resumed');
     }
 
     /**
@@ -194,7 +231,7 @@ class FluidTranscriptionManager {
         // Minimum samples: at least 1 second of audio at source rate
         const minSamples = this.audioContext ? this.audioContext.sampleRate : 48000;
         if (this.sampleBuffer.length < minSamples) {
-            return; // Not enough audio, skip
+            return; // Not enough audio, skip (also avoids sending silence after pause flush)
         }
 
         // Take all buffered samples

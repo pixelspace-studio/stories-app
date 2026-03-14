@@ -22,7 +22,8 @@
                 </button>
                 <div class="header-title-group">
                     <h1 class="app-title">
-                        Turn your voice into <span class="title-bold">stories</span><span class="title-dot">.</span>
+                        <span class="title-full">Speak out your <span class="title-bold">stories</span><span class="title-dot">.</span></span>
+                        <span class="title-compact"><span class="title-bold">stories</span><span class="title-dot">.</span></span>
                     </h1>
                     <!-- Recording info appears here when recording -->
                     <div id="recordingInfo" class="recording-info-inline hidden">
@@ -36,9 +37,17 @@
                             <div class="wave"></div>
                             <div class="wave"></div>
                         </div>
-                        <button class="cancel-button-inline hidden" id="cancelButton" title="Cancel recording">
-                            <i class="ph ph-x"></i>
-                        </button>
+                        <div class="recording-buttons-group">
+                            <button class="pause-button-inline hidden" id="pauseButton" title="Pause recording">
+                                <i class="ph ph-pause"></i>
+                            </button>
+                            <button class="cancel-button-inline hidden" id="cancelButton" title="Cancel recording">
+                                <i class="ph ph-x"></i>
+                            </button>
+                            <button class="copy-path-button-inline hidden" id="agentCopyPathBtnInline" title="Copy feed path">
+                                <i class="ph ph-copy"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -58,39 +67,58 @@
         </header>
         
         <main class="app-main">
-            <!-- Agent Feed Panel (split view: agent left, Your Story right) -->
+            <!-- Agent Feed Panel (staging + active states) -->
             <div id="agentFeedPanel" class="agent-feed-panel hidden">
-                <!-- Left: Agent column -->
-                <div class="agent-col">
-                    <div class="agent-col-header">
-                        <div class="agent-status-dot" id="agentStatusDot"></div>
-                        <span class="agent-status-text" id="agentStatusText">Broadcasting...</span>
-                        <button class="agent-copy-path-btn" id="agentCopyPathBtn">
-                            <i class="ph ph-copy"></i> Copy feed path
-                        </button>
-                    </div>
-                    <div class="agent-messages" id="agentMessages"></div>
-                    <div class="agent-prompt-area">
-                        <div class="agent-chips" id="agentChips">
-                            <button class="agent-chip" data-prompt="summarize">Summarize</button>
-                            <button class="agent-chip" data-prompt="challenge">Challenge</button>
-                            <button class="agent-chip" data-prompt="ambiguities">Ambiguities</button>
-                        </div>
-                        <div class="agent-input-row">
-                            <textarea id="agentInput" class="agent-input" placeholder="Ask the agent..." rows="1"></textarea>
-                            <button id="agentSendBtn" class="agent-send-btn">
-                                <i class="ph ph-arrow-up"></i>
+                <!-- STAGING: shown before recording starts -->
+                <div class="agent-staging" id="agentStaging">
+                    <div class="agent-staging-content">
+                        <div class="agent-staging-header">
+                            <span class="agent-staging-title">Agent Mode</span>
+                            <button class="agent-copy-path-btn" id="agentCopyPathBtnStaging">
+                                <i class="ph ph-copy"></i> Copy feed path
                             </button>
                         </div>
+                        <div class="agent-mode-selector" id="agentModeSelector">
+                            <!-- Mode cards rendered dynamically -->
+                        </div>
+                        <button class="agent-begin-btn" id="agentBeginBtn">
+                            Begin Story
+                        </button>
                     </div>
                 </div>
-                <!-- Right: Your Story column (live chunks, collapsible) -->
-                <div class="story-col" id="storyCol">
-                    <div class="story-col-header" id="storyToggle">
-                        <span class="story-col-title">Your Story</span>
-                        <i class="ph ph-caret-right story-col-chevron"></i>
+
+                <!-- ACTIVE: shown during and after recording -->
+                <div class="agent-active" id="agentActive" style="display:none;">
+                    <div class="story-col" id="storyCol">
+                        <div class="story-col-header" id="storyToggle">
+                            <span class="story-col-title">Your Story</span>
+                            <i class="ph ph-caret-left story-col-chevron"></i>
+                        </div>
+                        <div class="story-col-feed" id="storyColFeed"></div>
                     </div>
-                    <div class="story-col-feed" id="storyColFeed"></div>
+                    <div class="agent-col">
+                        <div class="agent-col-header">
+                            <div class="agent-status-dot" id="agentStatusDot"></div>
+                            <span class="agent-status-text" id="agentStatusText">Broadcasting...</span>
+                            <button class="agent-mute-btn" id="agentMuteBtn" title="Mute agent">
+                                <i class="ph ph-speaker-high"></i>
+                            </button>
+                        </div>
+                        <div class="agent-messages" id="agentMessages"></div>
+                        <div class="agent-prompt-area">
+                            <div class="agent-chips" id="agentChips">
+                                <button class="agent-chip" data-prompt="summarize">Summarize</button>
+                                <button class="agent-chip" data-prompt="challenge">Challenge</button>
+                                <button class="agent-chip" data-prompt="ambiguities">Ambiguities</button>
+                            </div>
+                            <div class="agent-input-row">
+                                <input type="text" id="agentInput" class="agent-input" placeholder="Ask the agent..." />
+                                <button id="agentSendBtn" class="agent-send-btn">
+                                    <i class="ph ph-arrow-up"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -8,6 +8,8 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const os = require('os');
 const robot = require('@jitsi/robotjs');
+app.commandLine.appendSwitch('remote-debugging-port', '9222');
+app.commandLine.appendSwitch('remote-allow-origins', '*');
 const { autoUpdater } = require('electron-updater');
 
 // ====================================
@@ -108,6 +110,9 @@ let screenCheckInterval = null;
 
 // Shortcuts tracking
 let currentRecordShortcut = 'CommandOrControl+Shift+R';
+
+// Realtime feed active flag (blocks widget recording when true)
+let realtimeFeedActive = false;
 
 // Database path (same as backend)
 const DATABASE_PATH = path.join(require('os').homedir(), 'Library/Application Support/Stories/transcriptions.db');
@@ -214,7 +219,7 @@ function createMainWindow() {
     console.error(`❌ Failed to load page: ${errorCode} - ${errorDescription}`);
   });
 
-  mainWindow.setContentProtection(true);
+  mainWindow.setContentProtection(false) // TODO: restore to true;
 
   // CRITICAL: Prevent window from closing - minimize to Dock instead
   // User can click on minimized window in Dock to restore
@@ -313,7 +318,7 @@ async function createWidgetWindow(shouldHide = false) {
     hasShadow: true
   });
 
-  widgetWindow.setContentProtection(true);
+  widgetWindow.setContentProtection(false) // TODO: restore to true;
 
   // Create a simple widget HTML file
   const widgetHtmlPath = path.join(__dirname, 'widget.html');
@@ -1130,7 +1135,18 @@ async function registerGlobalShortcuts() {
 
 async function toggleRecording() {
   console.log('🎤 Toggle recording:', isRecording ? 'STOP' : 'START');
-  
+
+  // Block widget recording when realtime feed is active — user must use main window
+  if (!isRecording && realtimeFeedActive) {
+    console.warn('⚠️ Cannot start recording from widget: Realtime feed active — use main window');
+    new Notification({
+      title: 'Stories',
+      body: 'Use main window for Agent Mode',
+      silent: true
+    }).show();
+    return;
+  }
+
   // Check if API key is configured (only when starting recording)
   // Use cached value to avoid blocking HTTP call on every toggle
   if (!isRecording) {
@@ -2615,6 +2631,12 @@ ipcMain.handle('resize-widget', (event, width, height) => {
       height: height
     }, true);  // true = animate the transition
   }
+});
+
+ipcMain.handle('set-realtime-active', (event, isActive) => {
+  realtimeFeedActive = isActive;
+  console.log(`📡 Realtime feed active: ${isActive}`);
+  return true;
 });
 
 ipcMain.handle('sync-recording-state', (event, message) => {
