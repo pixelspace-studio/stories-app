@@ -311,8 +311,11 @@ class FluidTranscriptionManager {
         const result = new Float32Array(newLength);
 
         for (let i = 0; i < newLength; i++) {
-            const srcIndex = Math.floor(i * ratio);
-            result[i] = samples[srcIndex];
+            const srcStart = Math.floor(i * ratio);
+            const srcEnd = Math.min(Math.floor((i + 1) * ratio), samples.length);
+            let sum = 0;
+            for (let j = srcStart; j < srcEnd; j++) sum += samples[j];
+            result[i] = sum / (srcEnd - srcStart);
         }
 
         return result;
