@@ -15,7 +15,7 @@ import os, re
 # Resolve signing identity: env var > .signing.config > None (skip signing)
 _signing_identity = os.environ.get('APPLE_SIGNING_IDENTITY')
 if not _signing_identity:
-    _config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.signing.config')
+    _config_path = os.path.join(SPECPATH, '..', '.signing.config')
     if os.path.exists(_config_path):
         _match = re.search(r'APPLE_SIGNING_IDENTITY="([^"]+)"', open(_config_path).read())
         if _match:

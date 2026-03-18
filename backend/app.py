@@ -2357,7 +2357,11 @@ from pathlib import Path as _Path
 @app.route('/api/agent-modes', methods=['GET'])
 def get_agent_modes():
     """Read all .md files from agent-modes/ dir, parse frontmatter + body."""
+    # In dev: __file__ is backend/app.py → parent.parent is repo root
+    # In packaged app: stories-backend is at Contents/Resources/ → modes are at Contents/Resources/app/agent-modes/
     modes_dir = _Path(__file__).parent.parent / 'agent-modes'
+    if not modes_dir.exists():
+        modes_dir = _Path(__file__).parent / 'app' / 'agent-modes'
     modes = []
     # Desired display order (unlisted files sorted alphabetically at end)
     _order = ['note-taker', 'tech-lead', 'bizdev-advisor', 'custom']
