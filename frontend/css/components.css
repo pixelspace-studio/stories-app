@@ -731,6 +731,7 @@
     opacity: 1;
     pointer-events: auto;
     cursor: pointer;
+    -webkit-app-region: no-drag;
 }
 
 
@@ -2199,6 +2200,39 @@
 }
 
 .agent-mode-badge.proactive { color: var(--color-pink); }
+
+/* Custom prompt box */
+.custom-prompt-box {
+    margin-top: var(--space-2);
+}
+
+.custom-prompt-box.hidden { display: none; }
+
+.custom-prompt-input {
+    width: 100%;
+    min-height: 60px;
+    max-height: 140px;
+    padding: var(--space-2);
+    background: var(--gray-8);
+    border: 1px solid var(--color-border-light);
+    border-radius: var(--radius-md);
+    color: var(--gray-70);
+    font-size: 11px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    transition: border-color var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.custom-prompt-input:focus {
+    border-color: var(--color-pink);
+}
+
+.custom-prompt-input::placeholder {
+    color: var(--gray-30);
+}
 
 /* Begin Story button */
 .agent-begin-btn {

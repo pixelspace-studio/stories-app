@@ -2,7 +2,24 @@
 """
 PyInstaller spec file for Stories backend
 Creates a standalone executable with all dependencies included
+
+Code signing is OPTIONAL and auto-detected:
+  - For local/test builds: just run `npm run test-build` — signing is skipped automatically
+  - For official releases (Flor): the .signing.config file in the repo root provides the
+    Pixelspace certificate identity. `npm run release` signs + notarizes.
+  - You can also set APPLE_SIGNING_IDENTITY env var to override.
 """
+
+import os, re
+
+# Resolve signing identity: env var > .signing.config > None (skip signing)
+_signing_identity = os.environ.get('APPLE_SIGNING_IDENTITY')
+if not _signing_identity:
+    _config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.signing.config')
+    if os.path.exists(_config_path):
+        _match = re.search(r'APPLE_SIGNING_IDENTITY="([^"]+)"', open(_config_path).read())
+        if _match:
+            _signing_identity = _match.group(1)
 
 block_cipher = None
 
@@ -73,8 +90,8 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity='Developer ID Application: Pixelspace, LLC (N7MMJYTBG2)',
-    entitlements_file='../entitlements.mac.plist',
+    codesign_identity=_signing_identity,
+    entitlements_file='../entitlements.mac.plist' if _signing_identity else None,
     # Note: PyInstaller's codesign doesn't support hardened runtime flag
     # Backend will be re-signed with hardened runtime in forge.config.js postPackage hook
 )

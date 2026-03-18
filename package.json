@@ -10,6 +10,7 @@
     "dev-simple": "npx electron electron/main.js --dev",
     "backend": "cd backend && python3 app.py",
     "build": "electron-forge package",
+    "test-build": "npm run make:community",
     "make": "npm run make:community",
     "make:community": "BUILD_TYPE=community electron-forge make && node scripts/post-make.js",
     "make:internal": "BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && node scripts/post-make.js",

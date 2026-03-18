@@ -2359,6 +2359,8 @@ def get_agent_modes():
     """Read all .md files from agent-modes/ dir, parse frontmatter + body."""
     modes_dir = _Path(__file__).parent.parent / 'agent-modes'
     modes = []
+    # Desired display order (unlisted files sorted alphabetically at end)
+    _order = ['note-taker', 'tech-lead', 'bizdev-advisor', 'custom']
     if modes_dir.exists():
         for f in sorted(modes_dir.glob('*.md')):
             text = f.read_text(encoding='utf-8')
@@ -2372,13 +2374,28 @@ def get_agent_modes():
                         if v.lower() == 'true': v = True
                         elif v.lower() == 'false': v = False
                         meta[k] = v
-                modes.append({
+                mode_entry = {
                     'id': f.stem,
                     'name': meta.get('name', f.stem),
                     'description': meta.get('description', ''),
                     'proactive': meta.get('proactive', False),
-                    'prompt': parts[2].strip()
-                })
+                    'prompt': parts[2].strip(),
+                    'custom': meta.get('custom', False),
+                }
+                # For custom mode, load saved user prompt if available
+                if mode_entry['custom']:
+                    cm = get_default_config_manager()
+                    saved = cm.get_setting('ui_settings.custom_agent_prompt')
+                    if saved:
+                        mode_entry['prompt'] = saved
+                modes.append(mode_entry)
+    # Sort by explicit order, then alphabetically
+    def _sort_key(m):
+        try:
+            return _order.index(m['id'])
+        except ValueError:
+            return len(_order)
+    modes.sort(key=_sort_key)
     return jsonify({'modes': modes})
 
 

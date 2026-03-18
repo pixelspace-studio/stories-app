@@ -2328,9 +2328,10 @@ class VoiceToTextApp {
         this.statusText.classList.add('hidden');
         this.visualizer.classList.remove('hidden');
         this.cancelButton.classList.remove('hidden');
-        // Show pause button only in realtime feed mode
+        // Show pause button only during an active agent/realtime session
+        const inAgentSession = this.isRealtimeFeedEnabled && this.isFluidEnabled && !!this._stagingSessionId;
         if (this.pauseButton) {
-            if (this.isRealtimeFeedEnabled && this.isFluidEnabled) {
+            if (inAgentSession) {
                 this.pauseButton.classList.remove('hidden');
                 this.pauseButton.innerHTML = '<i class="ph ph-pause"></i>';
                 this.pauseButton.title = 'Pause recording';
@@ -2338,10 +2339,10 @@ class VoiceToTextApp {
                 this.pauseButton.classList.add('hidden');
             }
         }
-        // Show inline copy-path button in agent mode
+        // Show inline copy-path button only during an active agent session
         const copyPathInline = document.getElementById('agentCopyPathBtnInline');
         if (copyPathInline) {
-            if (this.isRealtimeFeedEnabled && this.isFluidEnabled) {
+            if (inAgentSession) {
                 copyPathInline.classList.remove('hidden');
             } else {
                 copyPathInline.classList.add('hidden');
@@ -2586,7 +2587,25 @@ class VoiceToTextApp {
         // Reset wave styles
         const waves = this.visualizer?.querySelectorAll('.wave');
         if (waves) {
-            waves.forEach(w => { w.style.animation = ''; w.style.height = ''; });
+            waves.forEach(w => { w.style.animation = ''; w.style.height = ''; w.style.background = ''; });
+        }
+    }
+
+    // Open a mic stream solely for the visualizer (used when widget owns the recording stream)
+    async _startVisualizerOnlyStream() {
+        try {
+            this._vizOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this._setupAudioAnalyser(this._vizOnlyStream);
+        } catch (e) {
+            console.warn('Could not open visualizer-only mic stream:', e);
+        }
+    }
+
+    _stopVisualizerOnlyStream() {
+        this._stopAudioAnalyser();
+        if (this._vizOnlyStream) {
+            this._vizOnlyStream.getTracks().forEach(t => t.stop());
+            this._vizOnlyStream = null;
         }
     }
 
@@ -4407,6 +4426,8 @@ class VoiceToTextApp {
                     appInstance.isRecording = true;
                     appInstance.updateUIForRecording();
                     appInstance.startTimer();
+                    // Get a mic stream just for the visualizer (widget owns the real recording stream)
+                    appInstance._startVisualizerOnlyStream();
                     // After 3 seconds, hide "recording" text
                     setTimeout(() => {
                         if (appInstance.isRecording) {
@@ -4416,6 +4437,7 @@ class VoiceToTextApp {
                 } else if (message === 'widget_recording_stopped') {
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.updateUIForTranscribing();
                     appInstance.stopTimer();
                     
@@ -4465,6 +4487,7 @@ class VoiceToTextApp {
                 } else if (message === 'widget_recording_cancelled') {
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.stopTimer();
                     appInstance.updateUIForIdle();
                 } else if (message === 'widget_force_stopped') {
@@ -4472,6 +4495,7 @@ class VoiceToTextApp {
                     // Depending on the reason, it may have transcribed or cancelled
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.stopTimer();
                     // Show transcribing state first (in case it's transcribing)
                     // If it was cancelled, the widget will send widget_recording_cancelled next
@@ -4564,6 +4588,11 @@ class VoiceToTextApp {
         const container = document.getElementById('agentModeSelector');
         if (!container) return;
         container.innerHTML = '';
+
+        // Remove old custom prompt box if present
+        const oldBox = document.getElementById('customPromptBox');
+        if (oldBox) oldBox.remove();
+
         for (const mode of this.agentModes) {
             const card = document.createElement('div');
             card.className = `agent-mode-card${mode.id === this.selectedModeId ? ' selected' : ''}`;
@@ -4577,9 +4606,62 @@ class VoiceToTextApp {
                 this.selectedModeId = mode.id;
                 container.querySelectorAll('.agent-mode-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
+                this._toggleCustomPromptBox();
             });
             container.appendChild(card);
         }
+
+        // Insert custom prompt box after the mode selector
+        const box = document.createElement('div');
+        box.id = 'customPromptBox';
+        box.className = 'custom-prompt-box hidden';
+        box.innerHTML = `
+            <textarea id="customPromptInput" class="custom-prompt-input" placeholder="Write your custom prompt for the AI agent..." rows="3"></textarea>
+        `;
+        container.parentNode.insertBefore(box, container.nextSibling);
+
+        // Load saved prompt into textarea
+        const customMode = this.agentModes.find(m => m.custom);
+        if (customMode) {
+            document.getElementById('customPromptInput').value = customMode.prompt || '';
+        }
+
+        // Auto-save on change
+        const textarea = document.getElementById('customPromptInput');
+        let saveTimeout;
+        textarea.addEventListener('input', () => {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => this._saveCustomPrompt(textarea.value), 600);
+        });
+
+        this._toggleCustomPromptBox();
+    }
+
+    _toggleCustomPromptBox() {
+        const box = document.getElementById('customPromptBox');
+        if (!box) return;
+        const isCustom = this.selectedModeId === 'custom';
+        box.classList.toggle('hidden', !isCustom);
+        if (isCustom) {
+            const ta = document.getElementById('customPromptInput');
+            if (ta) setTimeout(() => ta.focus(), 50);
+        }
+    }
+
+    async _saveCustomPrompt(text) {
+        // Persist to settings
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.custom_agent_prompt`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: text })
+            });
+        } catch (e) {
+            console.warn('Failed to save custom prompt:', e);
+        }
+        // Also update in-memory mode prompt so beginStory uses latest text
+        const customMode = this.agentModes.find(m => m.custom);
+        if (customMode) customMode.prompt = text;
     }
 
     async beginStory() {
