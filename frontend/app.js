@@ -1568,15 +1568,12 @@ class VoiceToTextApp {
         this.transcriptionsContainer.appendChild(fragment);
         
         // Check if content overflows after rendering
-        // Temporarily enable scroll to get true scrollHeight
-        this.transcriptionsContainer.classList.add('scrollable');
-
         setTimeout(() => {
-            const hasOverflow = this.transcriptionsContainer.scrollHeight > this.transcriptionsContainer.clientHeight;
-            const hasMoreTranscriptions = transcriptions.length > this.initialDisplayCount;
+            // Show View More if there are >= initialDisplayCount transcriptions
+            // (at this window size, initialDisplayCount cards always overflow)
+            const hasMoreTranscriptions = transcriptions.length >= this.initialDisplayCount;
 
-            // Show Load More if: more transcriptions OR content overflows
-            const shouldShowLoadMore = !this.showingAll && (hasMoreTranscriptions || hasOverflow);
+            const shouldShowLoadMore = !this.showingAll && hasMoreTranscriptions;
 
             if (this.showingAll) {
                 // Showing all: hide Load More, enable scroll
@@ -1587,12 +1584,10 @@ class VoiceToTextApp {
                 // Has overflow or more content: show Load More
                 this.loadMoreButton.classList.remove('hidden');
                 this.gradientOverlay.classList.remove('hidden');
-                this.transcriptionsContainer.classList.remove('scrollable');
             } else {
                 // No overflow and not many transcriptions: hide both buttons
                 this.loadMoreButton.classList.add('hidden');
                 this.gradientOverlay.classList.add('hidden');
-                this.transcriptionsContainer.classList.remove('scrollable');
             }
             
             // Mark app as loaded (trigger crossfade from skeleton to real content)
@@ -3173,6 +3168,7 @@ class VoiceToTextApp {
 
     async clearAllTranscriptions() {
         this.closeClearHistoryModalHandler();
+        this.showingAll = false;
 
         this.clearHistoryButton.disabled = true;
         this.clearHistoryButton.style.opacity = '0.5';
