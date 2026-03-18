@@ -1581,13 +1581,15 @@ class VoiceToTextApp {
                 this.gradientOverlay.classList.add('hidden');
                 this.transcriptionsContainer.classList.add('scrollable');
             } else if (shouldShowLoadMore) {
-                // Has overflow or more content: show Load More
+                // Has overflow or more content: show Load More, disable scroll
                 this.loadMoreButton.classList.remove('hidden');
                 this.gradientOverlay.classList.remove('hidden');
+                this.transcriptionsContainer.classList.remove('scrollable');
             } else {
-                // No overflow and not many transcriptions: hide both buttons
+                // Not enough transcriptions: hide both buttons, disable scroll
                 this.loadMoreButton.classList.add('hidden');
                 this.gradientOverlay.classList.add('hidden');
+                this.transcriptionsContainer.classList.remove('scrollable');
             }
             
             // Mark app as loaded (trigger crossfade from skeleton to real content)
