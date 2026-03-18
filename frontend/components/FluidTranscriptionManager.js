@@ -222,68 +222,79 @@ class FluidTranscriptionManager {
 
     /**
      * POST a WAV chunk to the backend for transcription.
+     * Retries up to 2 times on transient errors (total 3 attempts).
      */
     async _transcribeChunk(wavBlob, segmentIndex) {
-        try {
-            const formData = new FormData();
-            formData.append('audio', wavBlob, `chunk_${segmentIndex}.wav`);
-            formData.append('session_id', this.sessionId);
-            formData.append('segment_index', segmentIndex.toString());
+        const MAX_ATTEMPTS = 3;
+        const RETRY_DELAY_MS = 1500;
+        const NON_RETRYABLE = ['api key', 'auth', '401', '403'];
 
-            const response = await fetch(`${this.backendUrl}/api/transcribe/chunk`, {
-                method: 'POST',
-                body: formData
-            });
+        let lastError = null;
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP ${response.status}`);
-            }
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                const formData = new FormData();
+                formData.append('audio', wavBlob, `chunk_${segmentIndex}.wav`);
+                formData.append('session_id', this.sessionId);
+                formData.append('segment_index', segmentIndex.toString());
 
-            const result = await response.json();
-
-            // Store successful segment
-            this.segments.push({
-                index: segmentIndex,
-                text: result.text || '',
-                status: 'success',
-                language: result.language || 'unknown',
-                duration: result.duration || 0
-            });
-
-            console.log(`✅ Fluid chunk ${segmentIndex} transcribed: "${(result.text || '').substring(0, 50)}..."`);
-
-            // Fire callback
-            if (this._onSegmentTranscribed) {
-                this._onSegmentTranscribed({
-                    index: segmentIndex,
-                    text: result.text,
-                    status: 'success'
+                const response = await fetch(`${this.backendUrl}/api/transcribe/chunk`, {
+                    method: 'POST',
+                    body: formData
                 });
-            }
 
-        } catch (error) {
-            console.error(`❌ Fluid chunk ${segmentIndex} failed:`, error.message);
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `HTTP ${response.status}`);
+                }
 
-            // Store failed segment
-            this.segments.push({
-                index: segmentIndex,
-                text: '',
-                status: 'error',
-                language: 'unknown',
-                duration: 0,
-                error: error.message
-            });
+                const result = await response.json();
 
-            // Fire callback with error
-            if (this._onSegmentTranscribed) {
-                this._onSegmentTranscribed({
+                if (attempt > 1) {
+                    console.log(`✅ Fluid chunk ${segmentIndex} transcribed on attempt ${attempt}`);
+                } else {
+                    console.log(`✅ Fluid chunk ${segmentIndex} transcribed: "${(result.text || '').substring(0, 50)}..."`);
+                }
+
+                this.segments.push({
                     index: segmentIndex,
-                    text: '',
-                    status: 'error',
-                    error: error.message
+                    text: result.text || '',
+                    status: 'success',
+                    language: result.language || 'unknown',
+                    duration: result.duration || 0
                 });
+
+                if (this._onSegmentTranscribed) {
+                    this._onSegmentTranscribed({ index: segmentIndex, text: result.text, status: 'success' });
+                }
+                return;
+
+            } catch (error) {
+                lastError = error;
+                const isNonRetryable = NON_RETRYABLE.some(k => error.message.toLowerCase().includes(k));
+
+                if (isNonRetryable || attempt === MAX_ATTEMPTS) {
+                    console.error(`❌ Fluid chunk ${segmentIndex} failed after ${attempt} attempt(s):`, error.message);
+                    break;
+                }
+
+                console.warn(`⚠️ Fluid chunk ${segmentIndex} attempt ${attempt} failed, retrying in ${RETRY_DELAY_MS}ms:`, error.message);
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
             }
+        }
+
+        // All attempts failed — store error segment
+        this.segments.push({
+            index: segmentIndex,
+            text: '',
+            status: 'error',
+            language: 'unknown',
+            duration: 0,
+            error: lastError.message
+        });
+
+        if (this._onSegmentTranscribed) {
+            this._onSegmentTranscribed({ index: segmentIndex, text: '', status: 'error', error: lastError.message });
         }
     }
 
