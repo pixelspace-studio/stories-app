@@ -39,13 +39,13 @@
                         </div>
                         <div class="recording-buttons-group">
                             <button class="pause-button-inline hidden" id="pauseButton" title="Pause recording">
-                                <i class="ph ph-pause"></i>
+                                <span class="pause-bar"></span><span class="pause-bar"></span>
                             </button>
                             <button class="cancel-button-inline hidden" id="cancelButton" title="Cancel recording">
                                 <i class="ph ph-x"></i>
                             </button>
-                            <button class="copy-path-button-inline hidden" id="agentCopyPathBtnInline" title="Copy feed path">
-                                <i class="ph ph-copy"></i>
+                            <button class="agent-copy-path-btn hidden" id="agentCopyPathBtnInline" title="Copy feed path">
+                                <i class="ph ph-broadcast"></i> Copy feed path
                             </button>
                         </div>
                     </div>
@@ -73,16 +73,16 @@
                 <div class="agent-staging" id="agentStaging">
                     <div class="agent-staging-content">
                         <div class="agent-staging-header">
-                            <span class="agent-staging-title">Agent Mode</span>
+                            <span class="agent-staging-title">Select or customize your real-time AI agent behavior</span>
                             <button class="agent-copy-path-btn" id="agentCopyPathBtnStaging">
-                                <i class="ph ph-copy"></i> Copy feed path
+                                <i class="ph ph-broadcast"></i> Copy feed path
                             </button>
                         </div>
                         <div class="agent-mode-selector" id="agentModeSelector">
                             <!-- Mode cards rendered dynamically -->
                         </div>
                         <button class="agent-begin-btn" id="agentBeginBtn">
-                            Begin Story
+                            <i class="ph ph-microphone"></i> Begin Story
                         </button>
                     </div>
                 </div>

@@ -55,6 +55,8 @@
     position: relative;
 }
 
+.record-button-circular.hidden { display: none; }
+
 .record-button-circular i {
     font-size: var(--text-2xl);
     color: var(--color-white);
@@ -159,6 +161,21 @@
 .title-dot {
     color: var(--color-pink);
     font-weight: 700;
+}
+
+.title-realtime {
+    font-weight: 300;
+}
+
+/* Staging Mode: reduce left padding and wrap for back button */
+.app-container.staging-mode .app-header {
+    padding-left: var(--space-6);
+    flex-wrap: wrap;
+}
+
+.app-container.staging-mode .agent-back-btn {
+    width: 100%;
+    margin-bottom: -4px;
 }
 
 /* Agent Mode: title floats top-left, recording info centers with stop button */
@@ -291,7 +308,7 @@
     display: none;
 }
 
-/* Pause Button (inline, circular like cancel) */
+/* Pause Button (inline, circular with custom double-bar icon) */
 .pause-button-inline {
     background: var(--gray-50);
     border: none;
@@ -301,6 +318,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 2.5px;
     cursor: pointer;
     transition: background var(--transition-fast);
     color: white;
@@ -309,6 +327,13 @@
 }
 .pause-button-inline:hover { background: var(--gray-60); }
 .pause-button-inline.hidden { display: none; }
+
+.pause-bar {
+    width: 1px;
+    height: 8px;
+    background: white;
+    border-radius: 0;
+}
 
 /* Copy Path Button (inline, circular like cancel/pause) */
 .copy-path-button-inline {
@@ -382,7 +407,7 @@
 /* Main Content */
 .app-main {
     flex: 1;
-    padding: 0 12px var(--space-4) 12px;
+    padding: 0 24px var(--space-4) 24px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -2132,6 +2157,23 @@
     gap: var(--space-4);
 }
 
+.agent-back-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--gray-50);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: color var(--transition-fast);
+    align-self: flex-start;
+}
+
+.agent-back-btn:hover { color: var(--gray-70); }
+.agent-back-btn i { font-size: 12px; }
+
 .agent-staging-header {
     display: flex;
     align-items: center;
@@ -2139,9 +2181,10 @@
 }
 
 .agent-staging-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--gray-60);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--gray-90);
+    letter-spacing: 0 !important;
 }
 
 /* Agent Active (flex wrapper for existing col layout) */
@@ -2179,18 +2222,20 @@
 }
 
 .agent-mode-card-name {
-    font-size: 11px;
-    font-weight: 500;
+    font-size: var(--text-sm);
+    font-weight: 400;
     color: var(--gray-70);
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    letter-spacing: 0 !important;
+    line-height: 1.35;
 }
 
 .agent-mode-card-desc {
-    font-size: 9px;
-    color: var(--gray-40);
-    line-height: 1.4;
+    font-size: var(--text-base);
+    color: var(--gray-90);
+    line-height: 1.5;
 }
 
 .agent-mode-badge {
@@ -2220,7 +2265,7 @@
     font-size: 11px;
     font-family: inherit;
     line-height: 1.5;
-    resize: vertical;
+    resize: none;
     outline: none;
     transition: border-color var(--transition-fast);
     box-sizing: border-box;
@@ -2541,17 +2586,18 @@
 .agent-copy-path-btn {
     margin-left: auto;
     background: none;
-    border: 1px solid var(--color-border-light);
-    padding: 2px 6px;
+    border: 1px solid var(--gray-25);
+    padding: 2px 8px;
     cursor: pointer;
-    color: var(--gray-40);
+    color: var(--gray-50);
     display: flex;
     align-items: center;
     gap: 3px;
-    border-radius: 4px;
+    border-radius: 100px;
     font-size: 9px;
     transition: all var(--transition-fast);
     white-space: nowrap;
+    -webkit-app-region: no-drag;
 }
 
 .agent-copy-path-btn:hover { color: var(--gray-70); border-color: var(--gray-30); }

@@ -2333,7 +2333,7 @@ class VoiceToTextApp {
         if (this.pauseButton) {
             if (inAgentSession) {
                 this.pauseButton.classList.remove('hidden');
-                this.pauseButton.innerHTML = '<i class="ph ph-pause"></i>';
+                this.pauseButton.innerHTML = '<span class="pause-bar"></span><span class="pause-bar"></span>';
                 this.pauseButton.title = 'Pause recording';
             } else {
                 this.pauseButton.classList.add('hidden');
@@ -4566,6 +4566,26 @@ class VoiceToTextApp {
         document.getElementById('agentActive').style.display = 'none';
         this.isStagingActive = true;
 
+        // Hide record button and swap title for staging
+        document.getElementById('appContainer')?.classList.add('staging-mode');
+        this.recordButton.classList.add('hidden');
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull) {
+            this._originalTitleHTML = titleFull.innerHTML;
+            titleFull.innerHTML = 'Speak out your <span class="title-bold">stories</span><span class="title-dot">.</span> <span class="title-realtime">in real-time</span>';
+        }
+
+        // Insert back button above the title in the header
+        const header = document.querySelector('.app-header');
+        if (header && !document.getElementById('agentBackBtn')) {
+            const backBtn = document.createElement('button');
+            backBtn.id = 'agentBackBtn';
+            backBtn.className = 'agent-back-btn';
+            backBtn.innerHTML = '<i class="ph ph-arrow-left"></i> Back to recent transcriptions';
+            backBtn.addEventListener('click', () => this.hideAgentPanel());
+            header.insertBefore(backBtn, header.firstChild);
+        }
+
         // Notify main process that realtime feed is active (blocks widget recording)
         if (window.electronAPI && window.electronAPI.setRealtimeActive) {
             window.electronAPI.setRealtimeActive(true);
@@ -4599,7 +4619,6 @@ class VoiceToTextApp {
             card.dataset.modeId = mode.id;
             card.innerHTML = `
                 <div class="agent-mode-card-name">${mode.name}</div>
-                <span class="agent-mode-badge ${mode.proactive ? 'proactive' : ''}">${mode.proactive ? 'proactive' : 'reactive'}</span>
                 <div class="agent-mode-card-desc">${mode.description}</div>
             `;
             card.addEventListener('click', () => {
@@ -4616,7 +4635,7 @@ class VoiceToTextApp {
         box.id = 'customPromptBox';
         box.className = 'custom-prompt-box hidden';
         box.innerHTML = `
-            <textarea id="customPromptInput" class="custom-prompt-input" placeholder="Write your custom prompt for the AI agent..." rows="3"></textarea>
+            <textarea id="customPromptInput" class="custom-prompt-input" placeholder="Write your custom instructions for the AI agent..." rows="3"></textarea>
         `;
         container.parentNode.insertBefore(box, container.nextSibling);
 
@@ -4741,6 +4760,15 @@ class VoiceToTextApp {
             if (staging) staging.style.display = '';
             const active = document.getElementById('agentActive');
             if (active) active.style.display = 'none';
+
+            // Restore record button, original title, and remove back button
+            document.getElementById('appContainer')?.classList.remove('staging-mode');
+            document.getElementById('agentBackBtn')?.remove();
+            this.recordButton.classList.remove('hidden');
+            const titleFull = document.querySelector('.title-full');
+            if (titleFull && this._originalTitleHTML) {
+                titleFull.innerHTML = this._originalTitleHTML;
+            }
 
             // Notify main process that realtime feed is no longer active
             if (window.electronAPI && window.electronAPI.setRealtimeActive) {

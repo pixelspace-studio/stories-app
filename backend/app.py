@@ -2364,7 +2364,7 @@ def get_agent_modes():
         modes_dir = _Path(__file__).parent / 'app' / 'agent-modes'
     modes = []
     # Desired display order (unlisted files sorted alphabetically at end)
-    _order = ['note-taker', 'tech-lead', 'bizdev-advisor', 'custom']
+    _order = ['senior-designer', 'tech-lead', 'bizdev-advisor', 'custom']
     if modes_dir.exists():
         for f in sorted(modes_dir.glob('*.md')):
             text = f.read_text(encoding='utf-8')
