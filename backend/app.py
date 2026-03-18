@@ -8,7 +8,7 @@ import os
 import sys
 import time
 
-VERSION = "0.9.8"
+VERSION = "0.9.9"
 import tempfile
 import sqlite3
 from datetime import datetime
