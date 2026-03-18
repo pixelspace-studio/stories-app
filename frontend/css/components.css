@@ -170,6 +170,7 @@
 /* Staging Mode — header-left wraps so back button gets its own row */
 .app-container.staging-mode .header-left {
     flex-wrap: wrap;
+    gap: var(--space-1);
 }
 
 .app-container.staging-mode .agent-back-btn {
