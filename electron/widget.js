@@ -887,10 +887,9 @@ class WidgetApp {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
-        
-        // Reset timer color and display to default
+
+        // Reset timer color only — keep displayed time frozen at last value
         this.timerDisplay.classList.remove('long-recording', 'max-time-warning');
-        this.timerDisplay.textContent = '00:00';
     }
 
     // ====================================
