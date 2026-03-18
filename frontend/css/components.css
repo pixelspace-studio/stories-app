@@ -12,7 +12,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: var(--space-6) var(--space-6) 0 var(--space-8);
+    padding: var(--space-6) 24px 0 24px;
     margin-bottom: var(--space-6);
     -webkit-app-region: drag;
     gap: var(--space-4);
@@ -167,15 +167,14 @@
     font-weight: 300;
 }
 
-/* Staging Mode: reduce left padding and wrap for back button */
-.app-container.staging-mode .app-header {
-    padding-left: var(--space-6);
+/* Staging Mode — header-left wraps so back button gets its own row */
+.app-container.staging-mode .header-left {
     flex-wrap: wrap;
 }
 
 .app-container.staging-mode .agent-back-btn {
     width: 100%;
-    margin-bottom: -4px;
+    margin-bottom: var(--space-2);
 }
 
 /* Agent Mode: title floats top-left, recording info centers with stop button */
@@ -2147,7 +2146,7 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    padding: 0 24px 24px 24px;
+    padding: 0 14px 24px 14px;
 }
 
 .agent-staging-content {
@@ -2168,7 +2167,7 @@
     align-items: center;
     gap: 4px;
     transition: color var(--transition-fast);
-    align-self: flex-start;
+    -webkit-app-region: no-drag;
 }
 
 .agent-back-btn:hover { color: var(--gray-70); }
@@ -2193,7 +2192,7 @@
     flex-direction: row;
     flex: 1;
     overflow: hidden;
-    padding: 0 var(--space-6) var(--space-6) var(--space-8);
+    padding: 0 4px var(--space-6) 14px;
 }
 
 /* Mode selector */

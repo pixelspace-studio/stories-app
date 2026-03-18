@@ -4575,15 +4575,15 @@ class VoiceToTextApp {
             titleFull.innerHTML = 'Speak out your <span class="title-bold">stories</span><span class="title-dot">.</span> <span class="title-realtime">in real-time</span>';
         }
 
-        // Insert back button above the title in the header
-        const header = document.querySelector('.app-header');
-        if (header && !document.getElementById('agentBackBtn')) {
+        // Insert back button inside header-left (sits below header-right, above title)
+        const headerLeft = document.querySelector('.header-left');
+        if (headerLeft && !document.getElementById('agentBackBtn')) {
             const backBtn = document.createElement('button');
             backBtn.id = 'agentBackBtn';
             backBtn.className = 'agent-back-btn';
             backBtn.innerHTML = '<i class="ph ph-arrow-left"></i> Back to recent transcriptions';
             backBtn.addEventListener('click', () => this.hideAgentPanel());
-            header.insertBefore(backBtn, header.firstChild);
+            headerLeft.insertBefore(backBtn, headerLeft.firstChild);
         }
 
         // Notify main process that realtime feed is active (blocks widget recording)
