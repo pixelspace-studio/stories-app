@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.9] - 2026-03-25
+
+**Release Date:** March 25, 2026
+
+### Added
+- **Fluid Transcription**: Real-time transcription as you record — results appear every ~15 seconds instead of waiting until the end
+  - Reduces wait time from 30–180s down to ~2s for long recordings
+  - Uses AudioContext + AudioWorklet for low-latency audio streaming
+  - Runs in parallel with the existing recording pipeline
+  - Toggleable in Settings
+- **Windows Auto-Paste**: Transcriptions now automatically paste into the active window on Windows (via Win32 API + PowerShell)
+
+### Fixed
+- **View More**: Scrollable state now correctly removed when "View More" button is shown or hidden
+- **History Clear**: `showingAll` state resets correctly when history is cleared; "View More" visibility updates properly
+- **Widget Timer**: Timer improvements for more accurate display during Fluid Transcription sessions
+- **Fluid Transcription Reliability**: Improved stability and chunk handling for long recordings
+
+---
+
 ## [0.9.8] - 2025-11-11
 
 **Release Date:** November 11, 2025
