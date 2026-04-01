@@ -509,6 +509,12 @@ class VoiceToTextApp {
             }
         });
 
+        // Transform apply button
+        const transformApplyBtn = document.getElementById('transformApplyBtn');
+        if (transformApplyBtn) {
+            transformApplyBtn.addEventListener('click', () => this.applyTransform());
+        }
+
         // Cancel button
         if (this.cancelButton) {
             this.cancelButton.addEventListener('click', (event) => {
@@ -1767,6 +1773,7 @@ class VoiceToTextApp {
             if (data && data.transcriptions) {
                 this.renderTranscriptions(data.transcriptions);
                 this.updateTranscriptionStats(data.transcriptions.length);
+
             } else {
                 this.renderTranscriptions([]);
                 this.updateTranscriptionStats(0);
@@ -1886,40 +1893,65 @@ class VoiceToTextApp {
         card.className = isError ? 'transcription-card error-card' : 'transcription-card';
         card.dataset.id = transcription.id;
         card.dataset.text = transcription.text; // Store text for copy action
-        
+
         // Store retry count for tracking (default 0)
         if (isError && transcription.audio_id) {
             card.dataset.retryCount = '0';
         }
 
         const timestamp = this.formatTimestamp(transcription.created_at);
-        
+        const sourceType = transcription.source_type || 'standard';
+        const canTransform = !isError && sourceType !== 'realtime';
+
         // For error cards with audio_id, show retry button instead of copy
         // For error cards without audio_id, show neither copy nor retry
         // For success cards, show copy button
         const errorIcon = isError ? '<i class="ph ph-warning-circle"></i>' : '';
-        
+
         let primaryButton = '';
         if (isError && transcription.audio_id) {
-            // Show retry button for errors with audio
             primaryButton = `
                 <button class="action-icon-button retry-button" title="Retry transcription" data-action="retry" data-audio-id="${transcription.audio_id}">
                     <i class="ph ph-arrows-clockwise"></i>
                 </button>
             `;
         } else if (!isError) {
-            // Show copy button for successful transcriptions
             primaryButton = `
                 <button class="action-icon-button copy-button" title="Copy to clipboard" data-action="copy">
                     <i class="ph ph-copy"></i>
                 </button>
             `;
         }
-        
+
+        // Transform button for eligible cards
+        const transformButton = canTransform ? `
+            <button class="action-icon-button transform-button" title="Transform" data-action="transform">
+                <i class="ph ph-magic-wand"></i>
+            </button>
+        ` : '';
+
+        // Transform label subtitle
+        const transformLabel = transcription.transform_label ? `
+            <span class="transform-label" title="${this.escapeHtml(transcription.transform_label)}">${this.escapeHtml(transcription.transform_label)}</span>
+        ` : '';
+
+        // Source type label for non-standard
+        const sourceLabel = sourceType === 'realtime' ? '<span class="transform-label" style="color: var(--gray-40);">Real-time transcription</span>' : '';
+
+        // View Original expandable + Restore Original
+        const viewOriginal = transcription.original_text ? `
+            <div class="original-actions">
+                <button class="view-original-btn" data-action="toggle-original">View Original</button>
+                <button class="restore-original-btn" data-action="restore-original">Restore Original</button>
+            </div>
+            <div class="original-text-content hidden">${this.escapeHtml(transcription.original_text)}</div>
+        ` : '';
+
         card.innerHTML = `
             <div class="transcription-header">
-                <span class="transcription-timestamp">${errorIcon}${timestamp}</span>
+                <span class="transcription-timestamp">${errorIcon}${timestamp}${transformLabel}${sourceLabel}</span>
                 <div class="transcription-actions">
+                    ${transformButton}
                     ${primaryButton}
                     <button class="action-icon-button delete-button" title="Delete transcription" data-action="delete">
                         <i class="ph ph-trash"></i>
@@ -1932,6 +1964,7 @@ class VoiceToTextApp {
                 </div>
             </div>
             <div class="transcription-content ${isError ? 'error-text' : ''}">${this.escapeHtml(transcription.text)}</div>
+            ${viewOriginal}
         `;
 
         return card;
@@ -1940,15 +1973,38 @@ class VoiceToTextApp {
     setupTranscriptionEventDelegation() {
         // Event delegation: One listener for all transcription cards
         this.transcriptionsContainer.addEventListener('click', (e) => {
+            // Handle View Original toggle
+            const viewOrigBtn = e.target.closest('.view-original-btn');
+            if (viewOrigBtn) {
+                const actionsDiv = viewOrigBtn.closest('.original-actions');
+                const originalContent = actionsDiv?.nextElementSibling;
+                if (originalContent) {
+                    originalContent.classList.toggle('hidden');
+                    viewOrigBtn.textContent = originalContent.classList.contains('hidden') ? 'View Original' : 'Hide Original';
+                }
+                return;
+            }
+
+            // Handle Restore Original
+            const restoreBtn = e.target.closest('.restore-original-btn');
+            if (restoreBtn) {
+                const card = restoreBtn.closest('.transcription-card');
+                if (card) {
+                    const transcriptionId = card.dataset.id;
+                    this.restoreOriginal(parseInt(transcriptionId));
+                }
+                return;
+            }
+
             const button = e.target.closest('.action-icon-button');
             if (!button) return;
-            
+
             const action = button.dataset.action;
             const card = button.closest('.transcription-card');
             if (!card) return;
-            
+
             const transcriptionId = card.dataset.id;
-            
+
             switch(action) {
                 case 'copy':
                     const text = card.dataset.text;
@@ -1964,6 +2020,9 @@ class VoiceToTextApp {
                 case 'retry':
                     const retryAudioId = button.dataset.audioId;
                     this.retryTranscription(transcriptionId, retryAudioId, card, button);
+                    break;
+                case 'transform':
+                    this.openTransformPanel(parseInt(transcriptionId));
                     break;
             }
         });
@@ -4399,12 +4458,22 @@ class VoiceToTextApp {
     setupWidgetSync() {
         if (window.electronAPI && window.electronAPI.onSyncRecordingState) {
         const appInstance = this;
-        
+
             window.electronAPI.onSyncRecordingState(async function(event, message) {
                 // Sync message received
-                
+
                 if (message === 'transcription_completed') {
                     await appInstance.loadTranscriptionHistory();
+                }
+            });
+        }
+
+        // Listen for triple-tap transform trigger from main process
+        if (window.electronAPI && window.electronAPI.onOpenTransformDropdown) {
+            window.electronAPI.onOpenTransformDropdown((event, transcriptionId) => {
+                const targetId = transcriptionId;
+                if (targetId) {
+                    this.openTransformPanel(targetId);
                 }
             });
         }
@@ -4523,6 +4592,347 @@ class VoiceToTextApp {
             });
         }
     }
+
+    // --- Smart Transforms ---
+
+    async initTransformPanel() {
+        // Cache presets on first call
+        if (!this._transformPresets) {
+            try {
+                const response = await fetch(`${this.backendUrl}/api/transform/presets`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this._transformPresets = data.presets;
+                }
+            } catch (error) {
+                console.error('Error loading transform presets:', error);
+            }
+        }
+    }
+
+    async openTransformPanel(transcriptionId) {
+        await this.initTransformPanel();
+        if (!this._transformPresets) return;
+
+        // Find transcription in our loaded data
+        this._transformTargetId = transcriptionId;
+        let transcription = null;
+        try {
+            const response = await fetch(`${this.backendUrl}/api/history`);
+            if (response.ok) {
+                const data = await response.json();
+                transcription = data.transcriptions.find(t => t.id === transcriptionId);
+            }
+        } catch (error) {
+            console.error('Error fetching transcription:', error);
+            return;
+        }
+        if (!transcription) return;
+
+        this._transformTranscription = transcription;
+
+        // Populate original text panel
+        // Left panel shows current text (which may be the latest transform result)
+        document.getElementById('transformOriginalText').textContent = transcription.text;
+        const leftTitle = document.getElementById('transformLeftTitle');
+        if (leftTitle) {
+            leftTitle.textContent = transcription.original_text ? 'Current' : 'Original';
+        }
+
+        // Reset result panel
+        document.getElementById('transformResultText').innerHTML = '<span class="transform-placeholder">Select a transform and apply</span>';
+
+
+        // Render pills
+        const pillsContainer = document.getElementById('transformPills');
+        pillsContainer.innerHTML = '';
+        this._selectedTransformPreset = null;
+
+        for (const preset of this._transformPresets) {
+            const pill = document.createElement('button');
+            pill.className = 'transform-pill';
+            pill.textContent = preset.label;
+            pill.dataset.presetId = preset.id;
+            pill.addEventListener('click', () => this._selectTransformPill(pill, preset));
+            pillsContainer.appendChild(pill);
+        }
+
+        // Reset custom prompt
+        document.getElementById('transformCustomPrompt').classList.add('hidden');
+        const customInput = document.getElementById('transformCustomInput');
+        if (customInput) customInput.value = '';
+
+        // Reset apply button
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.disabled = true;
+        applyBtn.classList.remove('processing');
+        applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+        applyBtn.style.display = '';
+
+        // Reset pills visibility
+        const pillsEl = document.getElementById('transformPills');
+        if (pillsEl) pillsEl.style.display = '';
+
+        // Clean up previous action row
+        const prevActionRow = document.getElementById('transformActionRow');
+        if (prevActionRow) prevActionRow.remove();
+
+        // Reset state flags
+        this._transformApplied = false;
+        this._transformAccepted = false;
+        this._pendingTransformResult = null;
+
+        // Show transform panel, hide transcriptions
+        const appContainer = document.getElementById('appContainer');
+        appContainer.classList.add('transform-mode');
+        document.getElementById('transformPanel').classList.remove('hidden');
+
+        // Change title
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull) {
+            if (!this._originalTitleHTML) this._originalTitleHTML = titleFull.innerHTML;
+            titleFull.innerHTML = 'Transform your <span class="title-bold">stories</span><span class="title-dot">.</span>';
+        }
+
+        // Add back button (same pattern as staging mode — inside header-left as first child)
+        this._addTransformBackButton();
+
+        // Hide record button
+        this.recordButton.classList.add('hidden');
+    }
+
+    _selectTransformPill(pill, preset) {
+        // Deselect all pills
+        document.querySelectorAll('.transform-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        this._selectedTransformPreset = preset;
+
+        // Show/hide custom prompt
+        const customBox = document.getElementById('transformCustomPrompt');
+        if (preset.id === 'custom') {
+            customBox.classList.remove('hidden');
+            document.getElementById('transformCustomInput').focus();
+        } else {
+            customBox.classList.add('hidden');
+        }
+
+        // Enable apply button
+        document.getElementById('transformApplyBtn').disabled = false;
+    }
+
+    _addTransformBackButton() {
+        const headerLeft = document.querySelector('.header-left');
+        if (headerLeft && !document.getElementById('transformBackBtn')) {
+            const backBtn = document.createElement('button');
+            backBtn.id = 'transformBackBtn';
+            backBtn.className = 'agent-back-btn';
+            backBtn.innerHTML = '<i class="ph ph-arrow-left"></i> Back to recent transcriptions';
+            backBtn.addEventListener('click', () => this.closeTransformPanel());
+            headerLeft.insertBefore(backBtn, headerLeft.firstChild);
+        }
+    }
+
+    async applyTransform() {
+        const preset = this._selectedTransformPreset;
+        if (!preset) return;
+
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.classList.add('processing');
+        applyBtn.innerHTML = '<i class="ph ph-circle-notch"></i> Applying...';
+        applyBtn.disabled = true;
+
+        // Build request — always transform current text
+        const body = {
+            transcription_id: this._transformTargetId,
+            source: 'current',
+        };
+
+        if (preset.id === 'custom') {
+            body.custom_prompt = document.getElementById('transformCustomInput').value.trim();
+            if (!body.custom_prompt) {
+                applyBtn.classList.remove('processing');
+                applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+                applyBtn.disabled = false;
+                return;
+            }
+        } else {
+            body.preset_id = preset.id;
+        }
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/transform/apply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                // Show result in right panel
+                document.getElementById('transformResultText').textContent = result.transformed_text;
+                this._pendingTransformResult = result.transformed_text;
+                this._transformApplied = true;
+
+                // Hide apply button, show accept/dismiss buttons
+                applyBtn.style.display = 'none';
+
+                // Hide pills and custom prompt (no longer needed)
+                document.getElementById('transformPills').style.display = 'none';
+                document.getElementById('transformCustomPrompt').classList.add('hidden');
+
+                const footer = document.querySelector('.transform-footer');
+                let actionRow = document.getElementById('transformActionRow');
+                if (!actionRow) {
+                    actionRow = document.createElement('div');
+                    actionRow.id = 'transformActionRow';
+                    actionRow.className = 'transform-action-row';
+                    actionRow.innerHTML = `
+                        <button class="transform-accept-btn" id="transformAcceptBtn">
+                            <i class="ph ph-check"></i> Accept Transform
+                        </button>
+                        <button class="transform-dismiss-btn" id="transformDismissBtn">
+                            Dismiss
+                        </button>
+                    `;
+                    footer.appendChild(actionRow);
+
+                    document.getElementById('transformAcceptBtn').addEventListener('click', () => this.acceptTransform());
+                    document.getElementById('transformDismissBtn').addEventListener('click', () => this.dismissTransform());
+                } else {
+                    actionRow.style.display = '';
+                }
+            } else {
+                // Error
+                applyBtn.classList.remove('processing');
+                applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+                applyBtn.disabled = false;
+                console.error('Transform error:', result.error);
+
+                // Show error in result panel
+                document.getElementById('transformResultText').innerHTML =
+                    `<span class="transform-placeholder" style="color: var(--color-pink);">${this.escapeHtml(result.error || 'Transform failed')}</span>`;
+            }
+        } catch (error) {
+            console.error('Transform request failed:', error);
+            applyBtn.classList.remove('processing');
+            applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+            applyBtn.disabled = false;
+            document.getElementById('transformResultText').innerHTML =
+                '<span class="transform-placeholder" style="color: var(--color-pink);">Network error — please try again</span>';
+        }
+    }
+
+    async acceptTransform() {
+        // Copy to clipboard
+        if (this._pendingTransformResult) {
+            try {
+                await navigator.clipboard.writeText(this._pendingTransformResult);
+            } catch (err) {
+                console.warn('Clipboard write failed:', err);
+            }
+        }
+        this._transformApplied = false;
+        this._transformAccepted = true;
+        this.closeTransformPanel();
+    }
+
+    async dismissTransform() {
+        // Revert the transform in the DB
+        if (this._transformTargetId) {
+            try {
+                await fetch(`${this.backendUrl}/api/transform/revert/${this._transformTargetId}`, {
+                    method: 'POST'
+                });
+            } catch (err) {
+                console.warn('Revert failed:', err);
+            }
+        }
+        this._transformApplied = false;
+        this._transformAccepted = false;
+
+        // Stay on panel — reset UI for another try
+        document.getElementById('transformResultText').innerHTML = '<span class="transform-placeholder">Select a transform and apply</span>';
+
+        // Hide accept/dismiss, show pills + apply button again
+        const actionRow = document.getElementById('transformActionRow');
+        if (actionRow) actionRow.style.display = 'none';
+
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.style.display = '';
+        applyBtn.style.background = '';
+        applyBtn.classList.remove('processing');
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+
+        document.getElementById('transformPills').style.display = '';
+
+        // Deselect pills
+        document.querySelectorAll('.transform-pill').forEach(p => p.classList.remove('active'));
+        this._selectedTransformPreset = null;
+        document.getElementById('transformCustomPrompt').classList.add('hidden');
+    }
+
+    closeTransformPanel() {
+        // If transform was applied but not accepted, revert it
+        if (this._transformApplied && !this._transformAccepted) {
+            this.dismissTransform();
+            return; // dismissTransform will call closeTransformPanel again after revert
+        }
+
+        const appContainer = document.getElementById('appContainer');
+        appContainer.classList.remove('transform-mode');
+        document.getElementById('transformPanel').classList.add('hidden');
+
+        // Remove back button
+        document.getElementById('transformBackBtn')?.remove();
+
+        // Clean up action row
+        const actionRow = document.getElementById('transformActionRow');
+        if (actionRow) actionRow.remove();
+
+        // Reset apply button
+        const applyBtn = document.getElementById('transformApplyBtn');
+        if (applyBtn) {
+            applyBtn.style.display = '';
+            applyBtn.style.background = '';
+        }
+
+        // Reset pills visibility
+        const pills = document.getElementById('transformPills');
+        if (pills) pills.style.display = '';
+
+        // Restore title
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull && this._originalTitleHTML) {
+            titleFull.innerHTML = this._originalTitleHTML;
+        }
+
+        // Restore record button
+        this.recordButton.classList.remove('hidden');
+
+        // Reset state
+        this._transformApplied = false;
+        this._transformAccepted = false;
+        this._pendingTransformResult = null;
+
+        // Reload history to reflect changes
+        this.loadTranscriptionHistory();
+    }
+
+    async restoreOriginal(transcriptionId) {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/transform/revert/${transcriptionId}`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                await this.loadTranscriptionHistory();
+            }
+        } catch (err) {
+            console.error('Restore original failed:', err);
+        }
+    }
+
 
     // --- Agent Modes + Staging ---
 

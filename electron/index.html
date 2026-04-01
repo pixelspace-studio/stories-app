@@ -122,9 +122,36 @@
                 </div>
             </div>
 
+            <!-- Transform Panel (side-by-side staging screen) -->
+            <div id="transformPanel" class="transform-panel hidden">
+                <div class="transform-body">
+                    <div class="transform-col transform-original">
+                        <h3 class="transform-col-title" id="transformLeftTitle">Current</h3>
+                        <div class="transform-col-content" id="transformOriginalText"></div>
+                    </div>
+                    <div class="transform-col transform-result">
+                        <h3 class="transform-col-title">Result</h3>
+                        <div class="transform-col-content" id="transformResultText">
+                            <span class="transform-placeholder">Select a transform and apply</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="transform-footer">
+                    <div class="transform-pills" id="transformPills">
+                        <!-- Rendered dynamically from /api/transform/presets -->
+                    </div>
+                    <div class="transform-custom-prompt hidden" id="transformCustomPrompt">
+                        <input type="text" class="transform-custom-input" id="transformCustomInput" placeholder="Describe your transform..." />
+                    </div>
+                    <button class="transform-apply-btn" id="transformApplyBtn" disabled>
+                        <i class="ph ph-magic-wand"></i> Apply Transform
+                    </button>
+                </div>
+            </div>
+
             <!-- Recent Transcriptions Section -->
             <div class="transcriptions-section">
-                <h2 class="section-title hidden">Recent transcriptions</h2>
+                <h2 class="section-title hidden">Recent stories</h2>
                 
                 <!-- Transcriptions Container with overflow gradient -->
                 <div class="transcriptions-wrapper">

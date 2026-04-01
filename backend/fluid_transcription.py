@@ -287,7 +287,8 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
                 transcription_data,
                 audio_id=audio_id,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
+                source_type='fluid'
             )
 
             logger.info(f"✅ Fluid transcription saved: id={transcription_id}, status={status}")

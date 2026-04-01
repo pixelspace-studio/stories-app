@@ -225,6 +225,14 @@
             min-width: 0;
             overflow: hidden;
         }
+
+        .widget-container.compact #transformButton {
+            width: 0;
+            min-width: 0;
+            overflow: hidden;
+            opacity: 0;
+            pointer-events: none;
+        }
         
         /* Expanded state: horizontal layout with gaps */
         .widget-container.expanded .widget-controls {
@@ -345,6 +353,140 @@
         .instant-mode .cancel-button {
             transition: none !important;
         }
+
+        /* ---- Smart Transforms (widget) ---- */
+
+        .transform-btn {
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            min-height: 24px;
+            border-radius: 50%;
+            border: 1px solid var(--gray-60);
+            background: var(--gray-90);
+            color: var(--gray-40);
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            -webkit-app-region: no-drag;
+            transition: opacity 0.3s ease, transform 0.3s ease, background 0.2s ease, border-color 0.2s ease;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .transform-btn i { font-size: 14px; }
+
+        .transform-btn:hover {
+            background: #0EA5E9;
+            border-color: #0EA5E9;
+            color: white;
+        }
+
+        .transform-btn.visible {
+            display: flex;
+        }
+
+        .transform-btn.active {
+            background: #0EA5E9;
+            border-color: #0EA5E9;
+            color: white;
+        }
+
+        .transform-btn.pulsing {
+            animation: transform-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes transform-pulse {
+            0%, 100% { border-color: var(--gray-60); }
+            50% { border-color: #0EA5E9; box-shadow: 0 0 8px rgba(14, 165, 233, 0.3); }
+        }
+
+        /* Transform dropdown — no border, options float in widget */
+        .transform-dropdown {
+            display: none;
+            flex-direction: column;
+            gap: 2px;
+            width: 100%;
+            z-index: 100;
+        }
+
+        .transform-dropdown.open {
+            display: flex;
+        }
+
+        /* When dropdown is open: controls on top, divider, options below */
+        .widget-container.dropdown-open {
+            flex-direction: column;
+            justify-content: flex-start;
+            padding: 6px 8px;
+        }
+
+        .widget-container.dropdown-open .widget-controls {
+            justify-content: center;
+            gap: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--gray-70);
+            margin-bottom: 6px;
+        }
+
+        .transform-dropdown-item {
+            padding: 6px 10px;
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            color: var(--gray-30);
+            font-size: 11px;
+            cursor: pointer;
+            text-align: left;
+            white-space: nowrap;
+            transition: all 0.15s ease;
+            -webkit-app-region: no-drag;
+        }
+
+        .transform-dropdown-item:hover {
+            background: var(--gray-80);
+            color: white;
+        }
+
+        /* Success checkmark state — blue to match transform accent */
+        .record-button.transform-success {
+            background-color: #0EA5E9;
+        }
+
+        /* Countdown timer during transform-ready */
+        .timer.transform-countdown {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--gray-30);
+            opacity: 1 !important;
+            width: 42px !important;
+            overflow: visible !important;
+            transform: translateX(0) scale(1) !important;
+            transition: none !important;
+        }
+
+        /* Instruction mode — blue accent for ALL states */
+        .widget-container.instruction-mode .record-button.recording,
+        .widget-container.instruction-mode .record-button.processing {
+            background-color: #0EA5E9;
+        }
+
+        .instruction-label {
+            display: none;
+            font-size: 9px;
+            color: #0EA5E9;
+            white-space: nowrap;
+            text-align: center;
+            position: absolute;
+            bottom: -14px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .widget-container.instruction-mode .instruction-label {
+            display: block;
+        }
     </style>
 </head>
         <body>
@@ -361,7 +503,15 @@
                     <button id="cancelButton" class="cancel-button">
                         <i class="ph ph-x"></i>
                     </button>
+                    <!-- Transform button (shown after transcription) -->
+                    <button id="transformButton" class="transform-btn" title="Transform">
+                        <i class="ph ph-magic-wand"></i>
+                    </button>
                 </div>
+                <!-- Transform dropdown (positioned above widget) -->
+                <div id="transformDropdown" class="transform-dropdown"></div>
+                <!-- Instruction mode label -->
+                <div class="instruction-label">Describe transform...</div>
             </div>
 
     <!-- Telemetry Client -->

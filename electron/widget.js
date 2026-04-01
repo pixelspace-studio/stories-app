@@ -45,6 +45,15 @@ class WidgetApp {
         // Instant recording mode (skip animations for faster start)
         this.instantMode = false;
 
+        // Smart Transforms — clean state
+        this.transformButton = document.getElementById('transformButton');
+        this.transformDropdown = document.getElementById('transformDropdown');
+        this._transformPresets = null;
+        this._lastTranscriptionId = null;
+        this._autoPasteEnabled = false;
+        this._transformCountdownTimer = null;
+        this.isInstructionMode = false; // true = recording a voice instruction for custom transform
+
         this.init();
         this.setupRecordingConfig(); // Listen for config from main process
     }
@@ -68,9 +77,14 @@ class WidgetApp {
         // Set up button event listeners
         this.recordButton.addEventListener('click', () => this.handleRecordClick());
         this.cancelButton.addEventListener('click', (event) => {
-            event.stopPropagation(); // CRITICAL: Prevent event bubbling
-            event.preventDefault();  // CRITICAL: Prevent default behavior
-            this.cancelRecording('cancel_button');
+            event.stopPropagation();
+            event.preventDefault();
+            // In transform states, cancel = dismiss transform mode
+            if (this.currentState.startsWith('transform_')) {
+                this.setWidgetState('inactive');
+            } else {
+                this.cancelRecording('cancel_button');
+            }
         });
         
         // Force stop mechanism: hold stop button for 2 seconds
@@ -113,7 +127,9 @@ class WidgetApp {
 
         // Start button state polling
         this.startButtonStatePolling();
-        
+
+        // Smart Transforms setup
+        this.setupTransform();
     }
     
     async initializeTelemetry() {
@@ -298,7 +314,8 @@ class WidgetApp {
             }, 3000);
             
             // NOTIFY MAIN WINDOW: Widget started recording
-            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+            // Skip notification in instruction mode — main window should not sync
+            if (!this.isInstructionMode && window.electronAPI && window.electronAPI.syncRecordingState) {
                 try {
                     await window.electronAPI.syncRecordingState('widget_recording_started');
                     // Request main window to play record start sound
@@ -463,13 +480,13 @@ class WidgetApp {
             this.mediaRecorder.start();
             console.log('🎛️ MediaRecorder started');
 
-            // Start fluid transcription if enabled
-            console.log(`🔄 Widget: fluid enabled=${this.isFluidEnabled}, manager=${!!this.fluidTranscription}`);
-            if (this.isFluidEnabled && this.fluidTranscription) {
+            // Start fluid transcription if enabled (NEVER in instruction mode)
+            console.log(`🔄 Widget: fluid enabled=${this.isFluidEnabled}, manager=${!!this.fluidTranscription}, instructionMode=${this.isInstructionMode}`);
+            if (this.isFluidEnabled && this.fluidTranscription && !this.isInstructionMode) {
                 console.log('🔄 Widget: Starting fluid transcription...');
                 this.fluidTranscription.start(stream);
             } else {
-                console.log('🔄 Widget: Fluid OFF — using classic mode');
+                console.log(`🔄 Widget: Using classic mode${this.isInstructionMode ? ' (instruction mode)' : ''}`);
             }
 
             this.startTimer();
@@ -523,7 +540,8 @@ class WidgetApp {
             console.log('🎛️ Web recording stopped');
 
             // NOTIFY MAIN WINDOW: Widget stopped recording
-            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+            // Skip notification in instruction mode — main window should not sync
+            if (!this.isInstructionMode && window.electronAPI && window.electronAPI.syncRecordingState) {
                 try {
                     await window.electronAPI.syncRecordingState('widget_recording_stopped');
                     // Request main window to play record stop sound
@@ -552,8 +570,8 @@ class WidgetApp {
             // Stage 1: Starting (10%)
             this.setTranscriptionProgress(10);
             
-            // Notify main process: widget is transcribing
-            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+            // Notify main process: widget is transcribing (skip in instruction mode)
+            if (!this.isInstructionMode && window.electronAPI && window.electronAPI.syncRecordingState) {
                 try {
                     await window.electronAPI.syncRecordingState('widget_transcribing');
                 } catch (error) {
@@ -614,6 +632,10 @@ class WidgetApp {
             
             const formData = new FormData();
             formData.append('audio', audioBlob, 'recording.webm');
+            // Instruction mode: don't save to DB (ephemeral transcription)
+            if (this.isInstructionMode) {
+                formData.append('ephemeral', 'true');
+            }
             
             console.log('🎛️ Sending to backend for transcription...');
             
@@ -684,6 +706,13 @@ class WidgetApp {
                     platform: await this.getPlatform()
                 });
                 
+                // Smart Transforms: instruction mode intercept
+                if (this.isInstructionMode) {
+                    console.log('🪄 Instruction mode — using transcription as transform prompt');
+                    this._endInstructionMode(data.text);
+                    return; // Skip normal auto-paste and history flow
+                }
+
                 // Execute auto-paste using Electron API (same as main window)
                 try {
                     if (window.electronAPI && window.electronAPI.requestAutoPaste) {
@@ -736,13 +765,22 @@ class WidgetApp {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
                 
+                // Store last transcription ID for transforms
+                this._lastTranscriptionId = transcriptionId || null;
+
                 // Notify main window to refresh history
                 try {
                     console.log('🔄 Notifying main window to refresh history...');
                     await window.electronAPI.syncRecordingState('transcription_completed');
                     console.log('✅ Main window notified of new transcription');
-                    
+
+                    // Show transform-ready state (will be skipped if auto-paste is on)
+                    if (this._lastTranscriptionId) {
+                        this.showTransformReady(this._lastTranscriptionId);
+                    }
+
                     // Request widget hide if auto-hide is enabled
+                    // (main process will defer hide if transform window is active)
                     if (window.electronAPI.requestWidgetHide) {
                         await window.electronAPI.requestWidgetHide();
                     }
@@ -802,9 +840,12 @@ class WidgetApp {
                 console.error('❌ Could not notify main window:', notifyError);
             }
         } finally {
-            // Always return to inactive state
             this.stopTimer();
-            await this.setWidgetState('inactive');
+            // Only go inactive if we're still in a transcription state
+            // (transform states manage their own transitions)
+            if (this.currentState === 'transcribing') {
+                await this.setWidgetState('inactive');
+            }
         }
     }
 
@@ -999,15 +1040,24 @@ class WidgetApp {
                     await window.electronAPI.requestAutoPaste(completeData.text);
                 }
 
+                // Store transcription ID for transforms
+                this._lastTranscriptionId = completeData.transcription_id || null;
+
                 // Notify main window to refresh history
                 if (window.electronAPI && window.electronAPI.syncRecordingState) {
                     await window.electronAPI.syncRecordingState('transcription_completed');
+                }
+
+                // Show transform-ready state
+                if (this._lastTranscriptionId) {
+                    this.showTransformReady(this._lastTranscriptionId);
                 }
 
                 this.setTranscriptionProgress(100);
             }
 
             // Request widget hide if auto-hide enabled
+            // (main process will defer hide if transform window is active)
             if (window.electronAPI && window.electronAPI.requestWidgetHide) {
                 await window.electronAPI.requestWidgetHide();
             }
@@ -1024,7 +1074,10 @@ class WidgetApp {
             this._fluidStopping = false;
             this.isCancelled = false;
             this.stopTimer();
-            await this.setWidgetState('inactive');
+            // Only go inactive if still in a transcription state
+            if (this.currentState === 'transcribing') {
+                await this.setWidgetState('inactive');
+            }
         }
     }
 
@@ -1234,10 +1287,13 @@ class WidgetApp {
     }
 
     // Widget state management functions
+    // States: inactive, starting, recording, recording_active, transcribing,
+    //         transform_ready, transform_dropdown, transform_processing, transform_success
     async setWidgetState(state) {
+        const prev = this.currentState;
         this.currentState = state;
-        console.log(`🎛️ Setting widget state to: ${state}`);
-        
+        console.log(`🎛️ Widget state: ${prev} → ${state}`);
+
         switch(state) {
             case 'inactive':
                 await this.showInactiveState();
@@ -1254,10 +1310,167 @@ class WidgetApp {
             case 'transcribing':
                 await this.showTranscribingState();
                 break;
+            case 'transform_ready':
+                this._showTransformReadyState();
+                break;
+            case 'transform_dropdown':
+                this._showTransformDropdownState();
+                break;
+            case 'transform_processing':
+                this._showTransformProcessingState();
+                break;
+            case 'transform_success':
+                this._showTransformSuccessState();
+                break;
         }
     }
 
+    // ---- Transform State Handlers ----
+
+    _showTransformReadyState() {
+        // Stop any transcription progress interval
+        if (this.transcriptionProgressInterval) {
+            clearInterval(this.transcriptionProgressInterval);
+            this.transcriptionProgressInterval = null;
+        }
+        this.timerDisplay.classList.remove('transcription-progress');
+
+        // Layout: expanded with mic + cancel + countdown + transform button
+        this.widgetContainer.classList.remove('compact', 'dropdown-open', 'instruction-mode');
+        this.widgetContainer.classList.add('expanded');
+
+        // Show transform button with pulse
+        this.transformButton.classList.add('visible', 'pulsing');
+
+        // Record button: inactive mic icon
+        this.recordButton.className = 'record-button inactive';
+        this.recordButton.innerHTML = '<i class="ph ph-microphone"></i>';
+        this.recordButton.style.removeProperty('background-color');
+        this.recordButton.style.opacity = '1';
+
+        // Show cancel button (X) — push to right with transform button
+        this.cancelButton.style.opacity = '1';
+        this.cancelButton.style.marginLeft = 'auto';
+        this.cancelButton.disabled = false;
+
+        // Resize widget: just enough for R + timer + X + T
+        if (window.electronAPI && window.electronAPI.resizeWidget) {
+            window.electronAPI.resizeWidget(160, 40, 'down');
+        }
+
+        // Start countdown: 3, 2, 1
+        // Use double-rAF to guarantee "3" is painted before timer starts
+        this._clearTransformCountdown();
+        this.timerDisplay.textContent = '3';
+        this.timerDisplay.style.opacity = '1';
+        this.timerDisplay.classList.add('transform-countdown');
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                // "3" is now painted on screen — start 1-second timer
+                this._transformCountdownTimer = setTimeout(() => {
+                    this.timerDisplay.textContent = '2';
+                    this._transformCountdownTimer = setTimeout(() => {
+                        this.timerDisplay.textContent = '1';
+                        this._transformCountdownTimer = setTimeout(() => {
+                            this._transformCountdownTimer = null;
+                            // Countdown expired — user didn't want transforms
+                            this.setWidgetState('inactive');
+                        }, 1000);
+                    }, 1000);
+                }, 1000);
+            });
+        });
+    }
+
+    _showTransformDropdownState() {
+        // Stop countdown
+        this._clearTransformCountdown();
+        this.timerDisplay.style.opacity = '0';
+
+        // Stop pulsing, show active (blue)
+        this.transformButton.classList.remove('pulsing');
+        this.transformButton.classList.add('active');
+
+        // Show cancel button (X) = dismiss transform mode
+        this.cancelButton.style.opacity = '1';
+        this.cancelButton.disabled = false;
+
+        // Layout: column with controls on top, divider, dropdown below
+        this.widgetContainer.classList.add('dropdown-open');
+
+        // Resize widget DOWNWARD to fit dropdown snugly
+        if (window.electronAPI && window.electronAPI.resizeWidget) {
+            window.electronAPI.resizeWidget(200, 280, 'down');
+        }
+
+        // Populate and show dropdown (no dismiss text button — cancel X handles it)
+        this.transformDropdown.innerHTML = '';
+        for (const preset of (this._transformPresets || [])) {
+            const item = document.createElement('button');
+            item.className = 'transform-dropdown-item';
+            item.textContent = preset.label;
+            item.addEventListener('click', () => {
+                if (preset.id === 'custom') {
+                    this._startInstructionMode();
+                } else {
+                    this._applyWidgetTransform(preset.id, null);
+                }
+            });
+            this.transformDropdown.appendChild(item);
+        }
+
+        this.transformDropdown.classList.add('open');
+    }
+
+    _showTransformProcessingState() {
+        // Close dropdown, hide transform button
+        this.transformDropdown.classList.remove('open');
+        this.transformButton.classList.remove('visible', 'pulsing', 'active');
+        this.widgetContainer.classList.remove('dropdown-open');
+        // Keep instruction-mode for blue accent during processing
+        // (will be cleaned up by showInactiveState)
+
+        // Compact with blue spinner (transform context)
+        this.widgetContainer.classList.remove('expanded');
+        this.widgetContainer.classList.add('compact');
+        this.recordButton.className = 'record-button processing';
+        this.recordButton.innerHTML = '<div class="spinner-custom"></div>';
+        this.recordButton.style.backgroundColor = '#0EA5E9';
+        this.cancelButton.style.opacity = '0';
+        this.timerDisplay.style.opacity = '0';
+
+        if (window.electronAPI && window.electronAPI.resizeWidget) {
+            window.electronAPI.resizeWidget(48, 48);
+        }
+    }
+
+    _showTransformSuccessState() {
+        // Green checkmark
+        this.recordButton.className = 'record-button transform-success';
+        this.recordButton.innerHTML = '<i class="ph ph-check" style="font-size:20px;color:white;"></i>';
+
+        // Auto-transition to inactive + hide after 1.2s
+        setTimeout(() => {
+            this.setWidgetState('inactive');
+            if (window.electronAPI && window.electronAPI.requestWidgetHide) {
+                window.electronAPI.requestWidgetHide();
+            }
+        }, 1200);
+    }
+
     async showInactiveState() {
+        // ---- Clean up ALL transform state ----
+        this._clearTransformCountdown();
+        this.transformDropdown.classList.remove('open');
+        this.transformButton.classList.remove('visible', 'pulsing', 'active');
+        this.widgetContainer.classList.remove('dropdown-open', 'instruction-mode');
+        this.isInstructionMode = false;
+        // Notify main process instruction mode ended (safety)
+        if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
+            window.electronAPI.setWidgetInstructionMode(false);
+        }
+
         // Signal that transcription is complete (accelerate progress to 95%)
         this.transcriptionCompleted = true;
 
@@ -1269,17 +1482,19 @@ class WidgetApp {
             this.recordButton.innerHTML = '<i class="ph ph-microphone"></i>';
             this.recordButton.style.opacity = '1';
             this.recordButton.style.removeProperty('background-color');
-            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.remove('recording', 'processing', 'transform-success');
             this.recordButton.classList.add('inactive');
             this.cancelButton.style.opacity = '0';
+            this.cancelButton.style.marginLeft = '';
             this.timerDisplay.style.opacity = '0';
         } else {
             // Normal mode: smooth transitions
             await this.updateButtonContent('<i class="ph ph-microphone"></i>');
             this.recordButton.style.removeProperty('background-color');
-            this.recordButton.classList.remove('recording', 'processing');
+            this.recordButton.classList.remove('recording', 'processing', 'transform-success');
             this.recordButton.classList.add('inactive');
             this.cancelButton.style.opacity = '0';
+            this.cancelButton.style.marginLeft = '';
             this.timerDisplay.style.opacity = '0';
 
             // Wait for fade out (100ms matches transition)
@@ -1715,6 +1930,163 @@ class WidgetApp {
             console.log('✅ Widget shortcut listener setup complete');
         } else {
             console.log('⚠️ Shortcut listener not available');
+        }
+    }
+
+    // ====================================
+    // SMART TRANSFORMS
+    // ====================================
+
+    setupTransform() {
+        this._loadAutoPasteSetting();
+        this._loadTransformPresets();
+
+        // Transform button click → toggle dropdown
+        if (this.transformButton) {
+            this.transformButton.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (this.currentState === 'transform_dropdown') {
+                    // Already open — close
+                    this.setWidgetState('inactive');
+                } else {
+                    this._openTransformDropdown();
+                }
+            });
+        }
+
+        // Triple-tap from main process → open dropdown
+        if (window.electronAPI && window.electronAPI.onOpenTransformDropdown) {
+            window.electronAPI.onOpenTransformDropdown((event, transcriptionId) => {
+                if (transcriptionId) this._lastTranscriptionId = transcriptionId;
+                this._openTransformDropdown();
+            });
+        }
+
+        // Click outside dropdown → dismiss
+        document.addEventListener('click', (e) => {
+            if (this.currentState === 'transform_dropdown') {
+                if (!this.transformDropdown.contains(e.target) && e.target !== this.transformButton) {
+                    this.setWidgetState('inactive');
+                }
+            }
+        });
+
+        // Keyboard shortcut while in instruction mode → stop recording
+        if (window.electronAPI && window.electronAPI.onStopInstructionRecording) {
+            window.electronAPI.onStopInstructionRecording(() => {
+                if (this.isInstructionMode && this.isRecording) {
+                    this.stopRecording();
+                }
+            });
+        }
+    }
+
+    async _loadAutoPasteSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.auto_paste`);
+            if (response.ok) {
+                const data = await response.json();
+                this._autoPasteEnabled = data.value === true;
+            }
+        } catch (e) {
+            console.warn('Could not load auto-paste setting');
+        }
+    }
+
+    async _loadTransformPresets() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/transform/presets`);
+            if (response.ok) {
+                const data = await response.json();
+                this._transformPresets = data.presets;
+            }
+        } catch (e) {
+            console.warn('Could not load transform presets');
+        }
+    }
+
+    // ---- Transform entry points (called by recording completion flow) ----
+
+    showTransformReady(transcriptionId) {
+        if (this._autoPasteEnabled) return;
+        this._lastTranscriptionId = transcriptionId;
+        this.setWidgetState('transform_ready');
+    }
+
+    // ---- Transform helpers ----
+
+    _clearTransformCountdown() {
+        if (this._transformCountdownTimer) {
+            clearTimeout(this._transformCountdownTimer);
+            this._transformCountdownTimer = null;
+        }
+        this.timerDisplay.classList.remove('transform-countdown');
+    }
+
+    _openTransformDropdown() {
+        if (!this._transformPresets || !this._lastTranscriptionId) return;
+        this.setWidgetState('transform_dropdown');
+    }
+
+    async _applyWidgetTransform(presetId, customPrompt) {
+        await this.setWidgetState('transform_processing');
+
+        try {
+            const body = {
+                transcription_id: this._lastTranscriptionId,
+                source: 'current'
+            };
+            if (presetId && presetId !== 'custom') {
+                body.preset_id = presetId;
+            } else if (customPrompt) {
+                body.custom_prompt = customPrompt;
+            }
+
+            const result = await window.electronAPI.requestTransformApply(body);
+
+            if (result && result.success) {
+                await this.setWidgetState('transform_success');
+            } else {
+                console.error('Widget transform error:', result?.error);
+                await this.setWidgetState('inactive');
+            }
+        } catch (error) {
+            console.error('Widget transform failed:', error);
+            await this.setWidgetState('inactive');
+        }
+    }
+
+    _startInstructionMode() {
+        this.isInstructionMode = true;
+
+        // Notify main process so keyboard shortcut can stop instruction recording
+        if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
+            window.electronAPI.setWidgetInstructionMode(true);
+        }
+
+        // Close dropdown, apply blue accent
+        this.transformDropdown.classList.remove('open');
+        this.widgetContainer.classList.remove('dropdown-open');
+        this.widgetContainer.classList.add('instruction-mode');
+        this.transformButton.classList.remove('visible', 'pulsing', 'active');
+
+        // Start recording for the instruction
+        this.handleRecordClick();
+    }
+
+    _endInstructionMode(instructionText) {
+        this.isInstructionMode = false;
+        this.widgetContainer.classList.remove('instruction-mode');
+
+        // Notify main process instruction mode ended
+        if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
+            window.electronAPI.setWidgetInstructionMode(false);
+        }
+
+        if (instructionText && instructionText.trim()) {
+            this._applyWidgetTransform('custom', instructionText.trim());
+        } else {
+            this.setWidgetState('inactive');
         }
     }
 }

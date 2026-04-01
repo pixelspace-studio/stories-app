@@ -1136,6 +1136,32 @@ async function registerGlobalShortcuts() {
 async function toggleRecording() {
   console.log('🎤 Toggle recording:', isRecording ? 'STOP' : 'START');
 
+  // INSTRUCTION MODE: If widget is recording a transform instruction, stop it via widget
+  if (widgetInstructionMode) {
+    console.log('🪄 Instruction mode active — sending stop to widget');
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('stop-instruction-recording');
+    }
+    return;
+  }
+
+  // TRIPLE-TAP: If not recording AND a transcription just finished within 3s → open transform
+  if (!isRecording && lastTranscriptionTimestamp && (Date.now() - lastTranscriptionTimestamp) < 3000) {
+    console.log('🪄 Triple-tap detected — opening transform dropdown');
+    const savedId = lastTranscriptionId;
+    lastTranscriptionTimestamp = null;
+    lastTranscriptionId = null;
+    if (transformWindowTimer) {
+      clearTimeout(transformWindowTimer);
+      transformWindowTimer = null;
+    }
+    // Notify widget only — do NOT open transform panel in main window
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('open-transform-dropdown', savedId);
+    }
+    return;
+  }
+
   // Block widget recording when realtime feed is active — user must use main window
   if (!isRecording && realtimeFeedActive) {
     console.warn('⚠️ Cannot start recording from widget: Realtime feed active — use main window');
@@ -1978,6 +2004,13 @@ let widgetHideTimeout = null;
 // Auto-paste setting
 let autoPasteEnabled = false;
 
+// Smart Transforms — triple-tap state
+let lastTranscriptionTimestamp = null;   // Date.now() when transcription completes
+let lastTranscriptionId = null;          // ID of last completed transcription
+let transformWindowTimer = null;         // 3-second timer for transform window
+let transformInProgress = false;         // Guard against concurrent transforms
+let widgetInstructionMode = false;       // Widget is recording a transform instruction
+
 // Instant recording setting (skip animations & defer non-critical work)
 let instantRecordingEnabled = false;
 
@@ -2051,6 +2084,24 @@ ipcMain.handle('update-api-key-cache', async (event, hasKey) => {
 ipcMain.handle('request-widget-hide', async (event) => {
   try {
     if (autoHideWidgetEnabled && widgetWindow && !widgetWindow.isDestroyed()) {
+      // Smart Transforms: defer hide if transform window is active
+      if (lastTranscriptionTimestamp) {
+        const elapsed = Date.now() - lastTranscriptionTimestamp;
+        const remaining = Math.max(0, 3000 - elapsed);
+        console.log(`🪄 Transform window active — deferring widget hide by ${remaining}ms`);
+        if (transformWindowTimer) clearTimeout(transformWindowTimer);
+        transformWindowTimer = setTimeout(() => {
+          transformWindowTimer = null;
+          // Only hide if transform window has expired and no dropdown is open
+          if (!lastTranscriptionTimestamp && widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
+            isWidgetActive = false;
+            widgetWindow.hide();
+            console.log('🪟 Widget hidden after transform window expired');
+          }
+        }, remaining);
+        return { success: true };
+      }
+
       // Clear any existing timeout (prevents race condition)
       if (widgetHideTimeout) {
         clearTimeout(widgetHideTimeout);
@@ -2473,6 +2524,70 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
   }
 });
 
+// ============================================================================
+// SMART TRANSFORMS — IPC HANDLERS
+// ============================================================================
+
+ipcMain.handle('request-transform-apply', async (event, data) => {
+  if (transformInProgress) {
+    return { success: false, error: 'Transform already in progress' };
+  }
+  transformInProgress = true;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/transform/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      // Copy to clipboard
+      clipboard.writeText(result.transformed_text);
+
+      // Show macOS notification
+      new Notification({
+        title: 'Stories',
+        body: 'Transform applied — copied to clipboard',
+        silent: true
+      }).show();
+
+      // Clear transform window state
+      lastTranscriptionTimestamp = null;
+      lastTranscriptionId = null;
+
+      // Notify main window to refresh
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'transcription_completed');
+      }
+    }
+
+    transformInProgress = false;
+    return result;
+  } catch (error) {
+    transformInProgress = false;
+    console.error('❌ Transform apply error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('transform-dropdown-closed', async () => {
+  // User dismissed transform dropdown without selecting — restart 3-second timer
+  if (!autoPasteEnabled) {
+    lastTranscriptionTimestamp = Date.now();
+    console.log('🪄 Transform dropdown closed — restarting 3s window');
+  }
+  return { success: true };
+});
+
+ipcMain.handle('widget-instruction-mode', async (event, active) => {
+  widgetInstructionMode = active;
+  console.log(`🪄 Widget instruction mode: ${active}`);
+  return { success: true };
+});
+
 // IPC handlers for dual-window architecture
 ipcMain.handle('get-backend-port', () => {
   return backendPort;
@@ -2613,23 +2728,31 @@ ipcMain.handle('get-window-states', () => {
   };
 });
 
-// Handle widget resize with animation (expand from center upwards)
-ipcMain.handle('resize-widget', (event, width, height) => {
+// Handle widget resize with animation
+// direction: 'down' = keep top-left, grow right+down. Default = center horizontally, expand upward.
+ipcMain.handle('resize-widget', (event, width, height, direction) => {
   if (widgetWindow && !widgetWindow.isDestroyed()) {
     const currentBounds = widgetWindow.getBounds();
-    const widthDiff = width - currentBounds.width;
-    const heightDiff = height - currentBounds.height;
-    
-    // Calculate new position to expand from center upwards
-    const newX = currentBounds.x - (widthDiff / 2);  // Center horizontally
-    const newY = currentBounds.y - heightDiff;        // Expand upwards
-    
-    widgetWindow.setBounds({
-      x: Math.round(newX),
-      y: Math.round(newY),
-      width: width,
-      height: height
-    }, true);  // true = animate the transition
+
+    if (direction === 'down') {
+      // Stay in place, just change size (grow right + down)
+      widgetWindow.setBounds({
+        x: currentBounds.x,
+        y: currentBounds.y,
+        width: width,
+        height: height
+      }, true);
+    } else {
+      // Center horizontally, expand upward
+      const widthDiff = width - currentBounds.width;
+      const heightDiff = height - currentBounds.height;
+      widgetWindow.setBounds({
+        x: Math.round(currentBounds.x - (widthDiff / 2)),
+        y: Math.round(currentBounds.y - heightDiff),
+        width: width,
+        height: height
+      }, true);
+    }
   }
 });
 
@@ -2666,6 +2789,12 @@ ipcMain.handle('sync-recording-state', (event, message) => {
     console.log('⏹️ Recording state updated: isRecording = false');
     // Update tray to ready state (green dot, will auto-revert to idle after 2 seconds)
     updateTrayState('ready');
+
+    // Smart Transforms: start 3-second transform window (only if auto-paste is OFF)
+    if (!autoPasteEnabled) {
+      lastTranscriptionTimestamp = Date.now();
+      console.log('🪄 Transform window opened (3s)');
+    }
   } else if (message === 'widget_transcription_error' || message === 'main_transcription_error' || message === 'transcription_failed') {
     isRecording = false;
     // Update tray back to idle on error

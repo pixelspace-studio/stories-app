@@ -294,20 +294,34 @@ def init_database():
         cursor.execute("ALTER TABLE transcriptions ADD COLUMN error_message TEXT")
         print("✅ Status migration completed")
     
+    # Migration: Add transform columns if they don't exist
+    for col, col_type in [
+        ('original_text', 'TEXT'),
+        ('transformed_text', 'TEXT'),
+        ('transform_label', 'TEXT'),
+        ('source_type', "TEXT DEFAULT 'standard'"),
+    ]:
+        try:
+            cursor.execute(f"SELECT {col} FROM transcriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            print(f"🔄 Migrating database: Adding {col} column...")
+            cursor.execute(f"ALTER TABLE transcriptions ADD COLUMN {col} {col_type}")
+            print(f"✅ {col} migration completed")
+
     # Create indexes for performance optimization
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_created_at 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_created_at
         ON transcriptions(created_at DESC)
     ''')
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_id 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_id
         ON transcriptions(audio_id)
     ''')
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_status 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_status
         ON transcriptions(status)
     ''')
-    
+
     conn.commit()
     conn.close()
     print(f"✅ Database initialized at: {DATABASE_PATH}")
@@ -589,11 +603,16 @@ def transcribe_audio():
                     print(f"Warning: Failed to apply dictionary corrections: {dict_error}")
                     # Continue with original text if dictionary fails
                 
-                try:
-                    transcription_id = save_transcription(transcription_data, audio_id)
-                    print(f"📝 Transcription saved with ID: {transcription_id}")
-                except Exception as db_error:
-                    print(f"Warning: Failed to save transcription to database: {db_error}")
+                # Skip saving if ephemeral (e.g., instruction mode for custom transforms)
+                ephemeral = request.form.get('ephemeral', 'false').lower() == 'true'
+                if not ephemeral:
+                    try:
+                        transcription_id = save_transcription(transcription_data, audio_id)
+                        print(f"📝 Transcription saved with ID: {transcription_id}")
+                    except Exception as db_error:
+                        print(f"Warning: Failed to save transcription to database: {db_error}")
+                else:
+                    print(f"📝 Ephemeral transcription — not saved to DB")
                 
                 # Update audio metadata with successful transcription (only if audio was saved)
                 if audio_id:
@@ -826,47 +845,49 @@ def transcribe_audio():
 
 
 # Database helper functions
-def save_transcription(data, audio_id=None, status='success', error_message=None):
+def save_transcription(data, audio_id=None, status='success', error_message=None, source_type='standard'):
     """Save transcription to database and return the ID
-    
+
     Args:
         data: Dictionary with transcription data (text, language, duration)
         audio_id: ID of the saved audio file
         status: 'success' or 'error'
         error_message: Error message if status is 'error'
+        source_type: Origin type — 'standard', 'fluid', or 'realtime'
     """
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    
+
     # Use local timestamp instead of SQLite's CURRENT_TIMESTAMP
     local_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     cursor.execute('''
-        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message))
-    
+        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message, source_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message, source_type))
+
     transcription_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
-    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} (status: {status}, audio_id: {audio_id})")
+
+    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} (status: {status}, audio_id: {audio_id}, source: {source_type})")
     return transcription_id
 
 def get_transcriptions():
     """Get all transcriptions ordered by newest first"""
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    
+
     cursor.execute('''
-        SELECT id, text, created_at, language, duration, audio_id, status, error_message
+        SELECT id, text, created_at, language, duration, audio_id, status, error_message,
+               original_text, transformed_text, transform_label, source_type
         FROM transcriptions
         ORDER BY created_at DESC
     ''')
-    
+
     rows = cursor.fetchall()
     conn.close()
-    
+
     transcriptions = []
     for row in rows:
         transcriptions.append({
@@ -876,10 +897,14 @@ def get_transcriptions():
             'language': row[3],
             'duration': row[4],
             'audio_id': row[5],
-            'status': row[6] if len(row) > 6 else 'success',  # Default to success for old records
-            'error_message': row[7] if len(row) > 7 else None
+            'status': row[6] if len(row) > 6 else 'success',
+            'error_message': row[7] if len(row) > 7 else None,
+            'original_text': row[8] if len(row) > 8 else None,
+            'transformed_text': row[9] if len(row) > 9 else None,
+            'transform_label': row[10] if len(row) > 10 else None,
+            'source_type': row[11] if len(row) > 11 else 'standard',
         })
-    
+
     return transcriptions
 
 def delete_transcription(transcription_id):
@@ -922,16 +947,17 @@ def get_transcription_by_audio_id(audio_id):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, text, created_at, language, duration, audio_id, status, error_message
+        SELECT id, text, created_at, language, duration, audio_id, status, error_message,
+               original_text, transformed_text, transform_label, source_type
         FROM transcriptions
         WHERE audio_id = ?
         ORDER BY created_at DESC
         LIMIT 1
     ''', (audio_id,))
-    
+
     row = cursor.fetchone()
     conn.close()
-    
+
     if row:
         return {
             'id': row[0],
@@ -941,7 +967,11 @@ def get_transcription_by_audio_id(audio_id):
             'duration': row[4],
             'audio_id': row[5],
             'status': row[6] if len(row) > 6 else 'success',
-            'error_message': row[7] if len(row) > 7 else None
+            'error_message': row[7] if len(row) > 7 else None,
+            'original_text': row[8] if len(row) > 8 else None,
+            'transformed_text': row[9] if len(row) > 9 else None,
+            'transform_label': row[10] if len(row) > 10 else None,
+            'source_type': row[11] if len(row) > 11 else 'standard',
         }
     return None
 
@@ -2574,6 +2604,229 @@ def post_feed_agent_unmute():
     with open(stories_feed, 'a', encoding='utf-8') as f:
         f.write(line + '\n')
     return jsonify({'ok': True})
+
+
+# ============================================================================
+# SMART TRANSFORMS
+# ============================================================================
+
+TRANSFORM_MODEL = "gpt-5.4-nano"
+
+TRANSFORM_PRESETS = [
+    {
+        "id": "translate_es",
+        "label": "Translate to Spanish",
+        "prompt": "Translate the following text to Spanish. Preserve the original meaning, tone, and formatting. Return only the translated text, nothing else."
+    },
+    {
+        "id": "translate_en",
+        "label": "Translate to English",
+        "prompt": "Translate the following text to English. Preserve the original meaning, tone, and formatting. Return only the translated text, nothing else."
+    },
+    {
+        "id": "format_nicely",
+        "label": "Format Nicely",
+        "prompt": "Format the following text with proper paragraphs, punctuation, capitalization, and spacing. Fix grammar issues but do not change the content or meaning. Return only the formatted text."
+    },
+    {
+        "id": "bullet_points",
+        "label": "Bullet Points",
+        "prompt": "Convert the following text into clear, concise bullet points. Group related ideas together. Return only the bullet points, nothing else."
+    },
+    {
+        "id": "structure",
+        "label": "Structure",
+        "prompt": "Restructure the following text for maximum readability. Add section headers where appropriate, organize ideas logically, and break up long blocks of text. Preserve all original content. Return only the structured text."
+    },
+    {
+        "id": "summarize",
+        "label": "Summarize",
+        "prompt": "Provide a concise summary of the following text. Capture all key points and important details. Return only the summary, nothing else."
+    },
+    {
+        "id": "make_concise",
+        "label": "Make Concise",
+        "prompt": "Rewrite the following text to be shorter and more concise while preserving all key information and meaning. Remove filler words, redundancy, and unnecessary detail. Return only the concise version."
+    },
+]
+
+TRANSFORM_SYSTEM_PROMPT = "You are a precise text transformation assistant. Apply the requested transformation exactly as instructed. Return only the transformed result — no preamble, no explanation, no commentary."
+
+
+@app.route('/api/transform/presets', methods=['GET'])
+def get_transform_presets():
+    """Return available transform presets for frontend/widget rendering."""
+    # Return presets without the full prompt (frontend only needs id + label)
+    presets = [{"id": p["id"], "label": p["label"]} for p in TRANSFORM_PRESETS]
+    # Add the custom option
+    presets.append({"id": "custom", "label": "Custom..."})
+    return jsonify({"presets": presets})
+
+
+@app.route('/api/transform/apply', methods=['POST'])
+def apply_transform():
+    """Apply a text transformation to a transcription using OpenAI Chat Completions.
+
+    Request body:
+        transcription_id: int — ID of the transcription to transform
+        preset_id: str | null — preset ID (e.g. 'translate_es') or null for custom
+        custom_prompt: str | null — custom instruction (only when preset_id is null or 'custom')
+        source: 'original' | 'current' — which text to transform (default 'current')
+    """
+    data = request.get_json()
+    if not data or 'transcription_id' not in data:
+        return jsonify({'error': 'transcription_id is required'}), 400
+
+    transcription_id = data['transcription_id']
+    preset_id = data.get('preset_id')
+    custom_prompt = data.get('custom_prompt')
+    source = data.get('source', 'current')
+
+    # Fetch transcription from DB
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, text, original_text, transformed_text, transform_label, source_type
+        FROM transcriptions WHERE id = ?
+    ''', (transcription_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Transcription not found'}), 404
+
+    current_text = row[1]
+    original_text = row[2]
+    source_type = row[5] or 'standard'
+
+    # Only realtime transcriptions are excluded from transforms
+    if source_type == 'realtime':
+        conn.close()
+        return jsonify({'error': 'Cannot transform real-time transcriptions'}), 400
+
+    # Determine source text
+    if source == 'original' and original_text:
+        source_text = original_text
+    else:
+        source_text = current_text
+
+    # Determine transform prompt
+    if preset_id and preset_id != 'custom':
+        preset = next((p for p in TRANSFORM_PRESETS if p['id'] == preset_id), None)
+        if not preset:
+            conn.close()
+            return jsonify({'error': f'Unknown preset: {preset_id}'}), 400
+        transform_prompt = preset['prompt']
+        label = preset['label']
+    elif custom_prompt:
+        transform_prompt = custom_prompt
+        label = f"Custom: {custom_prompt[:100]}"
+    else:
+        conn.close()
+        return jsonify({'error': 'Either preset_id or custom_prompt is required'}), 400
+
+    # Call OpenAI
+    client = get_openai_client()
+    if not client:
+        conn.close()
+        return jsonify({'error': 'OpenAI API not available. Please check your API key in Settings.'}), 503
+
+    import time as _time
+    max_retries = 3
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=TRANSFORM_MODEL,
+                messages=[
+                    {"role": "system", "content": TRANSFORM_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"{transform_prompt}\n\n---\n\n{source_text}"}
+                ]
+            )
+            result_text = response.choices[0].message.content.strip()
+            last_error = None
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning(f"⚠️ Transform attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                _time.sleep(1 * (attempt + 1))  # 1s, 2s backoff
+
+    if last_error:
+        conn.close()
+        logger.error(f"❌ Transform API error after {max_retries} attempts: {last_error}")
+        error_str = str(last_error).lower()
+        if "model" in error_str and ("not found" in error_str or "not have access" in error_str):
+            user_msg = f"Model '{TRANSFORM_MODEL}' is not available on your OpenAI account. Check your API key permissions or try a different model."
+        elif "insufficient_quota" in error_str or "exceeded" in error_str:
+            user_msg = "Your OpenAI account has no credits remaining. Add credits at platform.openai.com."
+        elif "invalid_api_key" in error_str or "incorrect api key" in error_str:
+            user_msg = "Invalid API key. Check your API key in Settings."
+        elif "rate_limit" in error_str or "too many requests" in error_str:
+            user_msg = "Too many requests. Wait a moment and try again."
+        elif "timeout" in error_str or "connection" in error_str or "network" in error_str:
+            user_msg = "Network error. Check your internet connection and try again."
+        else:
+            user_msg = f"Transform failed: {str(last_error)[:200]}"
+        return jsonify({'error': user_msg}), 500
+
+    # Update DB: preserve original on first transform, then update text
+    if not original_text:
+        # First transform — snapshot original
+        cursor.execute('''
+            UPDATE transcriptions
+            SET original_text = text, text = ?, transformed_text = ?, transform_label = ?
+            WHERE id = ?
+        ''', (result_text, result_text, label, transcription_id))
+    else:
+        # Re-transform — original already preserved
+        cursor.execute('''
+            UPDATE transcriptions
+            SET text = ?, transformed_text = ?, transform_label = ?
+            WHERE id = ?
+        ''', (result_text, result_text, label, transcription_id))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"✅ Transform applied: id={transcription_id}, label={label}")
+    return jsonify({
+        'success': True,
+        'transformed_text': result_text,
+        'label': label
+    })
+
+
+@app.route('/api/transform/revert/<int:transcription_id>', methods=['POST'])
+def revert_transform(transcription_id):
+    """Revert a transcription to its original text."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT id, original_text FROM transcriptions WHERE id = ?
+    ''', (transcription_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Transcription not found'}), 404
+
+    if not row[1]:
+        conn.close()
+        return jsonify({'error': 'No transform to revert — transcription is already original'}), 400
+
+    cursor.execute('''
+        UPDATE transcriptions
+        SET text = original_text, original_text = NULL, transformed_text = NULL, transform_label = NULL
+        WHERE id = ?
+    ''', (transcription_id,))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"✅ Transform reverted: id={transcription_id}")
+    return jsonify({'success': True, 'text': row[1]})
 
 
 # Register fluid transcription routes
