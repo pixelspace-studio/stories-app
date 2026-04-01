@@ -2797,6 +2797,71 @@ def apply_transform():
     })
 
 
+@app.route('/api/transform/prompt', methods=['POST'])
+def prompt_direct():
+    """Direct AI prompt — no prior transcription needed. User speaks a question/command."""
+    data = request.get_json()
+    prompt_text = data.get('prompt', '').strip()
+
+    if not prompt_text:
+        return jsonify({'success': False, 'error': 'No prompt provided'}), 400
+
+    client = get_openai_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'API key not configured'}), 500
+
+    # Call AI with the prompt directly
+    max_retries = 3
+    result_text = None
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=TRANSFORM_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant. Respond directly and concisely to the user's request."},
+                    {"role": "user", "content": prompt_text}
+                ],
+                temperature=0.7
+            )
+            result_text = response.choices[0].message.content.strip()
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                import time as _time
+                _time.sleep(1 * (attempt + 1))
+            else:
+                logger.error(f"❌ Prompt failed after {max_retries} attempts: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+    # Save as a story: original_text = prompt, text = response
+    label = f"Custom: {prompt_text}"
+    transcription_data = {
+        'text': result_text,
+        'language': 'en',
+        'duration': 0,
+        'model': TRANSFORM_MODEL
+    }
+    try:
+        transcription_id = save_transcription(transcription_data, source_type='standard')
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.execute(
+            'UPDATE transcriptions SET original_text = ?, transform_label = ?, transformed_text = ? WHERE id = ?',
+            (prompt_text, label, result_text, transcription_id)
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"📝 Prompt story saved with ID: {transcription_id}")
+    except Exception as db_error:
+        logger.warning(f"Failed to save prompt story: {db_error}")
+
+    return jsonify({
+        'success': True,
+        'text': result_text,
+        'prompt': prompt_text,
+        'label': label
+    })
+
+
 @app.route('/api/transform/revert/<int:transcription_id>', methods=['POST'])
 def revert_transform(transcription_id):
     """Revert a transcription to its original text."""

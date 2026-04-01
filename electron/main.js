@@ -1145,6 +1145,16 @@ async function toggleRecording() {
     return;
   }
 
+  // DOUBLE-TAP: If recording AND pressed again within 500ms → switch to prompt mode
+  if (isRecording && recordingStartTimestamp && (Date.now() - recordingStartTimestamp) < DOUBLE_TAP_WINDOW_MS) {
+    console.log('🎯 Double-tap detected — switching to prompt mode');
+    recordingStartTimestamp = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('switch-to-prompt-mode');
+    }
+    return; // Don't stop recording
+  }
+
   // TRIPLE-TAP: If not recording AND a transcription just finished within 3s → open transform
   if (!isRecording && lastTranscriptionTimestamp && (Date.now() - lastTranscriptionTimestamp) < 3000) {
     console.log('🪄 Triple-tap detected — opening transform dropdown');
@@ -2010,6 +2020,8 @@ let lastTranscriptionId = null;          // ID of last completed transcription
 let transformWindowTimer = null;         // 3-second timer for transform window
 let transformInProgress = false;         // Guard against concurrent transforms
 let widgetInstructionMode = false;       // Widget is recording a transform instruction
+let recordingStartTimestamp = null;      // When recording started (for double-tap detection)
+const DOUBLE_TAP_WINDOW_MS = 500;       // Max time between taps for prompt mode
 
 // Instant recording setting (skip animations & defer non-critical work)
 let instantRecordingEnabled = false;
@@ -2573,6 +2585,36 @@ ipcMain.handle('request-transform-apply', async (event, data) => {
   }
 });
 
+ipcMain.handle('request-prompt-apply', async (event, data) => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/transform/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      clipboard.writeText(result.text);
+      new Notification({
+        title: 'Stories',
+        body: 'AI response copied to clipboard',
+        silent: true
+      }).show();
+      // Notify main window to refresh history
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'transcription_completed');
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error('❌ Prompt apply error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('transform-dropdown-closed', async () => {
   // User dismissed transform dropdown without selecting — restart 3-second timer
   if (!autoPasteEnabled) {
@@ -2768,15 +2810,18 @@ ipcMain.handle('sync-recording-state', (event, message) => {
   // Update recording state flag and tray state
   if (message === 'widget_recording_started' || message === 'main_recording_started') {
     isRecording = true;
+    recordingStartTimestamp = Date.now(); // For double-tap detection
     console.log('🎬 Recording state updated: isRecording = true');
     // Update tray to recording state (red background)
     updateTrayState('recording');
   } else if (message === 'widget_recording_stopped' || message === 'main_recording_stopped') {
     isRecording = false;
+    recordingStartTimestamp = null;
     console.log('⏹️ Recording state updated: isRecording = false');
     // Don't update tray yet - wait for transcription to start
   } else if (message === 'widget_recording_cancelled') {
     isRecording = false;
+    recordingStartTimestamp = null;
     console.log('🚫 Recording cancelled - reverting tray to idle');
     updateTrayState('idle');
     // CRITICAL: Don't show or focus main window when cancelling

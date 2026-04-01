@@ -53,6 +53,7 @@ class WidgetApp {
         this._autoPasteEnabled = false;
         this._transformCountdownTimer = null;
         this.isInstructionMode = false; // true = recording a voice instruction for custom transform
+        this.isPromptMode = false;     // true = recording a direct AI prompt (double-tap)
 
         this.init();
         this.setupRecordingConfig(); // Listen for config from main process
@@ -520,7 +521,8 @@ class WidgetApp {
     async stopWebRecording() {
         if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
             // Check if fluid transcription is active
-            const fluidActive = this.fluidTranscription && this.fluidTranscription.isActive();
+            // SKIP fluid path in instruction/prompt mode — standard path has the intercept
+            const fluidActive = this.fluidTranscription && this.fluidTranscription.isActive() && !this.isInstructionMode;
 
             if (fluidActive) {
                 // Prevent processWebRecording from running
@@ -529,10 +531,16 @@ class WidgetApp {
                 this._fluidStopping = true;
             }
 
+            // Stop mediaRecorder and timer FIRST — user expects immediate response
             this.mediaRecorder.stop();
-
-            // Stop timer immediately — user pressed Stop, timer should freeze
             this.stopTimer();
+
+            // THEN stop fluid silently if we switched to instruction/prompt mode mid-recording
+            if (this.isInstructionMode && this.fluidTranscription && this.fluidTranscription.isActive()) {
+                // Fire-and-forget — don't await, let it clean up in background
+                this.fluidTranscription.stop().catch(() => {});
+                console.log('🔄 Fluid stopping in background (prompt/instruction mode)');
+            }
 
             // Clear recording source
             this.recordingSource = null;
@@ -706,10 +714,15 @@ class WidgetApp {
                     platform: await this.getPlatform()
                 });
                 
-                // Smart Transforms: instruction mode intercept
+                // Smart Transforms: instruction mode / prompt mode intercept
                 if (this.isInstructionMode) {
-                    console.log('🪄 Instruction mode — using transcription as transform prompt');
-                    this._endInstructionMode(data.text);
+                    if (this.isPromptMode) {
+                        console.log('🎯 Prompt mode — sending to AI as direct prompt');
+                        this._endPromptMode(data.text);
+                    } else {
+                        console.log('🪄 Instruction mode — using transcription as transform prompt');
+                        this._endInstructionMode(data.text);
+                    }
                     return; // Skip normal auto-paste and history flow
                 }
 
@@ -914,10 +927,9 @@ class WidgetApp {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
-        
-        // Reset timer color and display to default
+
+        // Remove warning styles but DON'T reset text — freeze at current time
         this.timerDisplay.classList.remove('long-recording', 'max-time-warning');
-        this.timerDisplay.textContent = '00:00';
     }
 
     // ====================================
@@ -1359,28 +1371,25 @@ class WidgetApp {
         }
 
         // Start countdown: 3, 2, 1
-        // Use double-rAF to guarantee "3" is painted before timer starts
+        // Delay 150ms to let layout changes settle before showing "3"
         this._clearTransformCountdown();
-        this.timerDisplay.textContent = '3';
         this.timerDisplay.style.opacity = '1';
         this.timerDisplay.classList.add('transform-countdown');
 
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                // "3" is now painted on screen — start 1-second timer
+        this._transformCountdownTimer = setTimeout(() => {
+            // Layout is settled — now show "3" for a full second
+            this.timerDisplay.textContent = '3';
+            this._transformCountdownTimer = setTimeout(() => {
+                this.timerDisplay.textContent = '2';
                 this._transformCountdownTimer = setTimeout(() => {
-                    this.timerDisplay.textContent = '2';
+                    this.timerDisplay.textContent = '1';
                     this._transformCountdownTimer = setTimeout(() => {
-                        this.timerDisplay.textContent = '1';
-                        this._transformCountdownTimer = setTimeout(() => {
-                            this._transformCountdownTimer = null;
-                            // Countdown expired — user didn't want transforms
-                            this.setWidgetState('inactive');
-                        }, 1000);
+                        this._transformCountdownTimer = null;
+                        this.setWidgetState('inactive');
                     }, 1000);
                 }, 1000);
-            });
-        });
+            }, 1000);
+        }, 150);
     }
 
     _showTransformDropdownState() {
@@ -1466,6 +1475,7 @@ class WidgetApp {
         this.transformButton.classList.remove('visible', 'pulsing', 'active');
         this.widgetContainer.classList.remove('dropdown-open', 'instruction-mode');
         this.isInstructionMode = false;
+        this.isPromptMode = false;
         // Notify main process instruction mode ended (safety)
         if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
             window.electronAPI.setWidgetInstructionMode(false);
@@ -1549,8 +1559,10 @@ class WidgetApp {
 
     async showRecordingState() {
         // Expanded widget - 130x40 (horizontal layout)
+        // Use 'down' (keep position) in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(130, 40);
+            const dir = this.isInstructionMode ? 'down' : undefined;
+            await window.electronAPI.resizeWidget(130, 40, dir);
         }
 
         this.widgetContainer.classList.remove('compact');
@@ -1633,13 +1645,15 @@ class WidgetApp {
         await this.updateButtonContent('<div class="spinner-custom"></div>');
         
         // Expanded widget - 130x40 (horizontal layout)
+        // Use 'down' in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(130, 40);
+            const dir = this.isInstructionMode ? 'down' : undefined;
+            await window.electronAPI.resizeWidget(130, 40, dir);
         }
-        
+
         this.widgetContainer.classList.remove('compact');
         this.widgetContainer.classList.add('expanded');
-        
+
         // Timer display shows percentage instead of time
         this.timerDisplay.style.opacity = '1';
         
@@ -1971,6 +1985,13 @@ class WidgetApp {
             }
         });
 
+        // Double-tap from main process → switch to prompt mode
+        if (window.electronAPI && window.electronAPI.onSwitchToPromptMode) {
+            window.electronAPI.onSwitchToPromptMode(() => {
+                this._enterPromptMode();
+            });
+        }
+
         // Keyboard shortcut while in instruction mode → stop recording
         if (window.electronAPI && window.electronAPI.onStopInstructionRecording) {
             window.electronAPI.onStopInstructionRecording(() => {
@@ -2086,6 +2107,55 @@ class WidgetApp {
         if (instructionText && instructionText.trim()) {
             this._applyWidgetTransform('custom', instructionText.trim());
         } else {
+            this.setWidgetState('inactive');
+        }
+    }
+
+    _enterPromptMode() {
+        // Already recording — just switch visuals from red to blue
+        this.isPromptMode = true;
+        this.isInstructionMode = true; // Reuse instruction isolation (no sync, non-fluid, ephemeral)
+
+        // Notify main process so next shortcut press stops recording
+        if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
+            window.electronAPI.setWidgetInstructionMode(true);
+        }
+
+        // Red → Blue transition (CSS handles the fade)
+        this.widgetContainer.classList.add('instruction-mode');
+        console.log('🎯 Prompt mode active — recording continues in blue');
+    }
+
+    async _endPromptMode(promptText) {
+        this.isInstructionMode = false;
+        this.isPromptMode = false;
+        this.widgetContainer.classList.remove('instruction-mode');
+
+        if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {
+            window.electronAPI.setWidgetInstructionMode(false);
+        }
+
+        if (!promptText || !promptText.trim()) {
+            this.setWidgetState('inactive');
+            return;
+        }
+
+        // Show blue processing spinner
+        await this.setWidgetState('transform_processing');
+
+        try {
+            const result = await window.electronAPI.requestPromptApply({
+                prompt: promptText.trim()
+            });
+
+            if (result && result.success) {
+                await this.setWidgetState('transform_success');
+            } else {
+                console.error('Prompt error:', result?.error);
+                this.setWidgetState('inactive');
+            }
+        } catch (error) {
+            console.error('Prompt failed:', error);
             this.setWidgetState('inactive');
         }
     }
