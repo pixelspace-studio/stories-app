@@ -1475,6 +1475,14 @@ class WidgetApp {
         this.transformButton.classList.remove('visible', 'pulsing', 'active');
         this.widgetContainer.classList.remove('dropdown-open', 'instruction-mode');
         this.isInstructionMode = false;
+
+        // Clear transform window state, then request hide (auto-hide respects the setting)
+        if (window.electronAPI && window.electronAPI.clearTransformWindow) {
+            await window.electronAPI.clearTransformWindow();
+        }
+        if (window.electronAPI && window.electronAPI.requestWidgetHide) {
+            window.electronAPI.requestWidgetHide();
+        }
         this.isPromptMode = false;
         // Notify main process instruction mode ended (safety)
         if (window.electronAPI && window.electronAPI.setWidgetInstructionMode) {

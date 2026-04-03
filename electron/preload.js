@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onStopInstructionRecording: (callback) => ipcRenderer.on('stop-instruction-recording', callback),
     onSwitchToPromptMode: (callback) => ipcRenderer.on('switch-to-prompt-mode', callback),
     requestPromptApply: (data) => ipcRenderer.invoke('request-prompt-apply', data),
+    clearTransformWindow: () => ipcRenderer.invoke('clear-transform-window'),
     getPlatform: () => ipcRenderer.invoke('get-platform'),
     getAppVersion: () => ipcRenderer.invoke('get-app-version'),
     platform: process.platform,

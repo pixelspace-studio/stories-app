@@ -2602,6 +2602,11 @@ ipcMain.handle('request-prompt-apply', async (event, data) => {
         body: 'AI response copied to clipboard',
         silent: true
       }).show();
+
+      // Clear transform window state (so auto-hide works)
+      lastTranscriptionTimestamp = null;
+      lastTranscriptionId = null;
+
       // Notify main window to refresh history
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('sync-recording-state-broadcast', 'transcription_completed');
@@ -2621,6 +2626,17 @@ ipcMain.handle('transform-dropdown-closed', async () => {
     lastTranscriptionTimestamp = Date.now();
     console.log('🪄 Transform dropdown closed — restarting 3s window');
   }
+  return { success: true };
+});
+
+ipcMain.handle('clear-transform-window', async () => {
+  lastTranscriptionTimestamp = null;
+  lastTranscriptionId = null;
+  if (transformWindowTimer) {
+    clearTimeout(transformWindowTimer);
+    transformWindowTimer = null;
+  }
+  console.log('🪄 Transform window cleared (widget went inactive)');
   return { success: true };
 });
 
@@ -2784,6 +2800,8 @@ ipcMain.handle('resize-widget', (event, width, height, direction) => {
         width: width,
         height: height
       }, true);
+      // Prevent widget from stealing focus during transform resize
+      widgetWindow.blur();
     } else {
       // Center horizontally, expand upward
       const widthDiff = width - currentBounds.width;
