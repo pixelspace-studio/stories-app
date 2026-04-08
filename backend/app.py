@@ -2652,6 +2652,22 @@ TRANSFORM_PRESETS = [
 
 TRANSFORM_SYSTEM_PROMPT = "You are a precise text transformation assistant. Apply the requested transformation exactly as instructed. Return only the transformed result — no preamble, no explanation, no commentary."
 
+PROMPT_SYSTEM_PROMPT = "You are a helpful assistant. Respond directly and concisely to the user's request."
+
+def _get_dictionary_context():
+    """Get dictionary words as context string for AI prompts."""
+    try:
+        dictionary = get_default_dictionary_manager()
+        if not dictionary.is_enabled():
+            return ""
+        words = dictionary.get_all_words()
+        if not words:
+            return ""
+        word_list = [w['word'] for w in words[:50]]
+        return f"\n\nWhen these proper nouns or terms appear, spell them exactly as: {', '.join(word_list)}"
+    except Exception:
+        return ""
+
 
 @app.route('/api/transform/presets', methods=['GET'])
 def get_transform_presets():
@@ -2739,7 +2755,7 @@ def apply_transform():
             response = client.chat.completions.create(
                 model=TRANSFORM_MODEL,
                 messages=[
-                    {"role": "system", "content": TRANSFORM_SYSTEM_PROMPT},
+                    {"role": "system", "content": TRANSFORM_SYSTEM_PROMPT + _get_dictionary_context()},
                     {"role": "user", "content": f"{transform_prompt}\n\n---\n\n{source_text}"}
                 ]
             )
@@ -2818,7 +2834,7 @@ def prompt_direct():
             response = client.chat.completions.create(
                 model=TRANSFORM_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant. Respond directly and concisely to the user's request."},
+                    {"role": "system", "content": PROMPT_SYSTEM_PROMPT + _get_dictionary_context()},
                     {"role": "user", "content": prompt_text}
                 ],
                 temperature=0.7
