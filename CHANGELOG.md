@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.9-4] - 2026-04-25
+
+### Added
+- **Gemini STT**: New speech-to-text engines alongside OpenAI Whisper
+  - `gemini-3-flash-preview` (UI label: "Gemini Flash")
+  - `gemini-3.1-flash-lite-preview` (UI label: "Gemini Flash Lite")
+  - Settings → STT model dropdown picks the active engine for all
+    transcription routes (standard, retry, fluid chunks)
+  - Settings → API Keys → Gemini stores the Google API key encrypted
+  - New REST endpoints: `GET/POST/DELETE /api/config/gemini-key`
+- **Per-story engine label**: Each transcription is tagged with the
+  STT engine that produced it. The label appears next to the timestamp
+  in Recent stories. New `stt_model` column on the transcriptions table
+  (auto-migrated on startup).
+
+### Changed
+- **Smart Transforms / Prompt Mode — plain text by default**:
+  Both system prompts now instruct the model to return raw plain text.
+  Markdown, headings, bullets, bold, italics, code blocks and tables
+  are opt-in: the model only formats output when the user's instruction
+  explicitly asks for visual structure.
+- **Settings UI**: API Keys grouped under a single subsection with
+  shorter, symmetric labels ("OpenAI" / "Gemini") and a unified
+  "Add Key" button. STT model dropdown sized to fit cleanly next to
+  its label.
+
+### Technical
+- New dependency: `google-genai==1.73.1`
+- `backend/gemini_transcription.py`: thin wrapper that returns the
+  same `RetryResult` shape as Whisper so the existing transcription
+  flow stays unchanged
+- `register_fluid_routes()` accepts `transcribe_chunk_fn` and
+  `stt_credentials_check` so chunk transcription respects the active
+  engine instead of hard-coding Whisper
+
+---
+
 ## [0.9.8] - 2025-11-11
 
 **Release Date:** November 11, 2025

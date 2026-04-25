@@ -1,7 +1,7 @@
 {
   "name": "stories-app",
   "productName": "Stories",
-  "version": "0.9.9-3",
+  "version": "0.9.9-4",
   "description": "Stories - Voice to text transcription",
   "main": "electron/main.js",
   "scripts": {
@@ -12,8 +12,9 @@
     "build": "electron-forge package",
     "test-build": "npm run make:community",
     "make": "npm run make:community",
-    "make:community": "BUILD_TYPE=community electron-forge make && node scripts/post-make.js",
-    "make:internal": "BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && node scripts/post-make.js",
+    "build:backend": "./.venv/bin/pip install -q -r backend/requirements.txt && cd backend && ../.venv/bin/pyinstaller backend.spec --noconfirm --distpath ../dist --workpath ./build",
+    "make:community": "npm run build:backend && BUILD_TYPE=community electron-forge make && node scripts/post-make.js",
+    "make:internal": "npm run build:backend && BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && node scripts/post-make.js",
     "notarize": "./scripts/notarize.sh",
     "notarize:check": "./scripts/check-notarization.sh",
     "notarize:status": "xcrun notarytool history --keychain-profile \"pixelspace-notarize\"",

@@ -96,6 +96,22 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.9-4
+───────────────────────────────────────────────────────────────
+
+GEMINI STT (NEW)
+  • Choose your speech-to-text engine in Settings → STT model
+  • Three options: OpenAI Whisper, Gemini Flash, Gemini Flash Lite
+  • Add your Google Gemini API key in Settings → API Keys
+  • Each story is tagged with the engine that produced it
+    (label appears next to the timestamp)
+
+SMART TRANSFORMS — PLAIN TEXT BY DEFAULT
+  • Transforms and prompt responses now return raw plain text
+  • Markdown / headings / bullets are opt-in: only used when you
+    explicitly ask for formatting in your instruction
+
+
 📝 CHANGELOG — v0.9.9-3
 ───────────────────────────────────────────────────────────────
 
@@ -127,7 +143,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.9-3
+Version: 0.9.9-4
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────
