@@ -118,16 +118,22 @@ def append_session_end_async(session_id, total_segments, total_duration):
     t.start()
 
 
-def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_transcription_fn, DATABASE_PATH):
+def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_transcription_fn, DATABASE_PATH,
+                          transcribe_chunk_fn=None, stt_credentials_check=None):
     """
     Register fluid transcription routes on the Flask app.
 
     Args:
         app: Flask app instance
-        get_openai_client: callable that returns an OpenAI client
+        get_openai_client: callable that returns an OpenAI client (legacy fallback)
         generate_whisper_prompt: callable that returns whisper prompt string
         save_transcription_fn: callable to save transcription to DB
         DATABASE_PATH: path to SQLite database
+        transcribe_chunk_fn: optional unified transcription dispatcher
+            (audio_file_path, prompt, audio_duration, max_attempts) -> RetryResult
+            When provided, used instead of calling Whisper directly so the active
+            STT engine selected in settings drives chunk transcription.
+        stt_credentials_check: optional callable returning (ok, error_msg) for the active engine
     """
 
     @app.route('/api/transcribe/chunk', methods=['POST'])
@@ -150,16 +156,25 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
 
             logger.info(f"🔄 Fluid chunk received: session={session_id}, segment={segment_index}")
 
-            # Get OpenAI client
-            client = get_openai_client()
-            if not client:
-                return jsonify({
-                    "error": "OpenAI API key not configured",
-                    "segment_index": segment_index,
-                    "retryable": False
-                }), 401
+            # Verify the active STT engine has credentials configured
+            if stt_credentials_check is not None:
+                ok, err = stt_credentials_check()
+                if not ok:
+                    return jsonify({
+                        "error": err,
+                        "segment_index": segment_index,
+                        "retryable": False
+                    }), 401
+            else:
+                # Legacy path: only Whisper is available
+                if not get_openai_client():
+                    return jsonify({
+                        "error": "OpenAI API key not configured",
+                        "segment_index": segment_index,
+                        "retryable": False
+                    }), 401
 
-            # Save audio to temp file for Whisper API
+            # Save audio to temp file for transcription API
             temp_path = None
             try:
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
@@ -169,15 +184,26 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
                 # Get dictionary prompt
                 prompt = generate_whisper_prompt()
 
-                # Transcribe with quick retry (max 2 attempts)
-                result = create_openai_transcription(
-                    audio_file_path=temp_path,
-                    client=client,
-                    model="whisper-1",
-                    response_format="verbose_json",
-                    prompt=prompt,
-                    audio_duration=None  # Let Whisper detect from WAV
-                )
+                if transcribe_chunk_fn is not None:
+                    retry_result = transcribe_chunk_fn(
+                        audio_file_path=temp_path,
+                        prompt=prompt,
+                        audio_duration=None,
+                        max_attempts=2,
+                    )
+                    if not retry_result.success:
+                        raise Exception(retry_result.error or "Transcription failed")
+                    result = retry_result.data
+                else:
+                    # Legacy: direct Whisper call
+                    result = create_openai_transcription(
+                        audio_file_path=temp_path,
+                        client=get_openai_client(),
+                        model="whisper-1",
+                        response_format="verbose_json",
+                        prompt=prompt,
+                        audio_duration=None  # Let Whisper detect from WAV
+                    )
 
                 logger.info(f"✅ Fluid chunk transcribed: session={session_id}, segment={segment_index}, "
                           f"chars={len(result.get('text', ''))}")
@@ -272,11 +298,20 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
             clean_text = re.sub(r'</seg>', ' ', clean_text)
             clean_text = re.sub(r'\s+', ' ', clean_text).strip()
 
+            # Look up active STT model so we can label this transcription
+            stt_model_setting = get_default_config_manager().get_setting('ui_settings.stt_model', 'whisper') or 'whisper'
+            stt_model_label = {
+                'whisper': 'Whisper',
+                'gemini-flash': 'Gemini Flash',
+                'gemini-flash-lite': 'Gemini Flash Lite',
+            }.get(stt_model_setting, stt_model_setting)
+
             # Save to database using existing function
             transcription_data = {
                 'text': clean_text,
                 'language': language,
-                'duration': total_duration
+                'duration': total_duration,
+                'stt_model': stt_model_label,
             }
 
             error_message = None

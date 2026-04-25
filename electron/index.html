@@ -200,18 +200,21 @@
                 <h2 class="settings-title">Settings</h2>
             </div>
             <div class="settings-options">
-                <!-- API Key Setting -->
+                <!-- API Keys group -->
+                <div class="settings-section-header">API Keys</div>
+
+                <!-- OpenAI Key (no key) -->
                 <div class="setting-item" id="apiKeySettingItem">
                     <div class="setting-row">
-                        <span class="setting-label">API Key</span>
-                        <button class="btn-gray" id="addApiKeyButton">Add API Key</button>
+                        <span class="setting-label">OpenAI</span>
+                        <button class="btn-gray" id="addApiKeyButton">Add Key</button>
                     </div>
                 </div>
-                
-                <!-- API Key Setting (with key configured) -->
+
+                <!-- OpenAI Key (configured) -->
                 <div class="setting-item setting-item-vertical hidden" id="apiKeyConfiguredItem">
                     <div class="setting-row">
-                        <span class="setting-label">API Key</span>
+                        <span class="setting-label">OpenAI</span>
                         <span class="api-key-display" id="apiKeyDisplay"></span>
                     </div>
                     <div class="setting-actions">
@@ -220,7 +223,45 @@
                         <a href="#" class="setting-link-secondary" id="removeApiKeySettingsButton">Remove</a>
                     </div>
                 </div>
-                
+
+                <!-- Gemini Key (no key) -->
+                <div class="setting-item" id="geminiKeySettingItem">
+                    <div class="setting-row">
+                        <span class="setting-label">Gemini</span>
+                        <button class="btn-gray" id="addGeminiKeyButton">Add Key</button>
+                    </div>
+                </div>
+
+                <!-- Gemini Key (configured) -->
+                <div class="setting-item setting-item-vertical hidden" id="geminiKeyConfiguredItem">
+                    <div class="setting-row">
+                        <span class="setting-label">Gemini</span>
+                        <span class="api-key-display" id="geminiKeyDisplay"></span>
+                    </div>
+                    <div class="setting-actions">
+                        <a href="#" class="setting-link" id="changeGeminiKeyButton">Change</a>
+                        <div class="action-separator"></div>
+                        <a href="#" class="setting-link-secondary" id="removeGeminiKeySettingsButton">Remove</a>
+                    </div>
+                </div>
+
+                <!-- STT Model Selector -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">STT model</span>
+                            <span class="setting-tooltip" title="Choose which model transcribes your audio">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <select id="sttModelSelect" class="setting-select">
+                            <option value="whisper">Whisper</option>
+                            <option value="gemini-flash">Gemini Flash</option>
+                            <option value="gemini-flash-lite">Gemini Flash Lite</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- Instant Recording Toggle -->
                 <div class="setting-item">
                     <div class="setting-row">
@@ -408,6 +449,46 @@
         </div>
     </div>
     
+    <!-- Gemini API Key Modal -->
+    <div id="geminiKeyModal" class="modal-overlay hidden">
+        <div class="api-modal">
+            <button class="modal-close" id="closeGeminiKeyModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title" id="geminiKeyModalTitle">Add Gemini API Key</h3>
+
+            <div id="currentGeminiKeySection" class="current-key-section hidden">
+                <span class="current-key-label">Current Gemini API Key:</span>
+                <span class="current-key-value" id="currentGeminiKeyValue">AIza...xxxx</span>
+            </div>
+
+            <label class="input-label" id="geminiKeyInputLabel">Enter your Google Gemini API Key</label>
+            <input
+                type="password"
+                id="geminiKeyInput"
+                class="api-input"
+                placeholder="AIza..."
+            >
+            <button class="modal-submit" id="submitGeminiKey">
+                <span id="submitGeminiKeyText">Save API Key</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Remove Gemini Key Confirmation Modal -->
+    <div id="removeGeminiKeyModal" class="modal-overlay hidden">
+        <div class="api-modal confirmation-modal">
+            <button class="modal-close" id="closeRemoveGeminiKeyModal">
+                <i class="ph ph-x"></i>
+            </button>
+            <h3 class="modal-title">Remove Gemini API Key?</h3>
+            <p class="modal-description">This will delete your Gemini API key from Stories.</p>
+            <button class="modal-submit-danger" id="confirmRemoveGeminiKey">
+                Remove Gemini Key
+            </button>
+        </div>
+    </div>
+
     <!-- Remove API Key Confirmation Modal -->
     <div id="removeApiKeyModal" class="modal-overlay hidden">
         <div class="api-modal confirmation-modal">

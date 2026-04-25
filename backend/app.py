@@ -63,6 +63,9 @@ load_dotenv()
 # Import retry logic
 from retry_logic import transcribe_with_retry, create_retry_notification, get_user_friendly_error, get_audio_duration
 
+# Import Gemini transcription
+from gemini_transcription import transcribe_with_gemini, GEMINI_MODELS
+
 # Import audio storage
 from audio_storage import get_default_storage_manager, save_temp_audio_with_metadata, save_temp_audio_with_metadata_safe
 
@@ -300,6 +303,7 @@ def init_database():
         ('transformed_text', 'TEXT'),
         ('transform_label', 'TEXT'),
         ('source_type', "TEXT DEFAULT 'standard'"),
+        ('stt_model', 'TEXT'),
     ]:
         try:
             cursor.execute(f"SELECT {col} FROM transcriptions LIMIT 1")
@@ -364,6 +368,73 @@ def get_openai_client():
 
 # Check if API key is available at startup (but don't initialize client yet)
 OPENAI_API_KEY = get_api_key()
+
+
+# ============================================================================
+# STT MODEL ROUTING
+# ============================================================================
+
+def get_stt_model() -> str:
+    """Read selected STT model from config. Defaults to 'whisper'."""
+    try:
+        return get_default_config_manager().get_setting('ui_settings.stt_model', 'whisper') or 'whisper'
+    except Exception:
+        return 'whisper'
+
+
+STT_MODEL_LABELS = {
+    'whisper': 'Whisper',
+    'gemini-flash': 'Gemini Flash',
+    'gemini-flash-lite': 'Gemini Flash Lite',
+}
+
+
+def run_transcription(audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
+    """
+    Dispatch transcription to the engine selected in settings.
+
+    Returns a RetryResult so callers can keep their existing flow.
+    The result.data dict is annotated with `stt_model` (friendly label)
+    so callers can persist which engine produced the transcription.
+    """
+    stt_model = get_stt_model()
+    label = STT_MODEL_LABELS.get(stt_model, stt_model)
+
+    if stt_model in GEMINI_MODELS:
+        gemini_key = get_default_config_manager().get_gemini_api_key()
+        result = transcribe_with_gemini(
+            audio_file_path=audio_file_path,
+            api_key=gemini_key,
+            model=GEMINI_MODELS[stt_model],
+            prompt=prompt,
+            audio_duration=audio_duration,
+        )
+    else:
+        result = transcribe_with_retry(
+            audio_file_path=audio_file_path,
+            openai_client=get_openai_client(),
+            max_attempts=max_attempts,
+            prompt=prompt,
+            audio_duration=audio_duration,
+        )
+
+    if result.success and isinstance(result.data, dict):
+        result.data['stt_model'] = label
+
+    return result
+
+
+def stt_credentials_ok() -> tuple[bool, str]:
+    """Check whether the credentials for the active STT engine exist."""
+    stt_model = get_stt_model()
+    if stt_model in GEMINI_MODELS:
+        key = get_default_config_manager().get_gemini_api_key()
+        if not key:
+            return False, "Gemini API key not configured. Add it in Settings."
+        return True, ""
+    if not get_api_key():
+        return False, "OpenAI API key not configured. Add it in Settings."
+    return True, ""
 API_AVAILABLE = bool(OPENAI_API_KEY)
 if not API_AVAILABLE:
     print("💡 Configure API key in .env file or use the configuration API")
@@ -399,29 +470,20 @@ def transcribe_audio():
     logger.info(f"🔗 Has Active Session: {has_active_session}")
     
     try:
-        # CRITICAL: Always update API_AVAILABLE dynamically from config
-        # Don't trust the global variable set at startup
-        api_key = get_api_key()
-        
-        # Update API_AVAILABLE based on CURRENT API key status
+        # CRITICAL: Always re-check credentials dynamically from config for the active STT engine
         global API_AVAILABLE
-        API_AVAILABLE = bool(api_key)
-        
-        logger.info(f"🔑 API Check: {'✅ Available' if API_AVAILABLE else '❌ Not Available'}")
-        
-        if api_key:
-            masked_key = f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 11 else "***"
-            logger.info(f"   API Key: {masked_key}")
-        else:
-            logger.error(f"   ❌ API Key NOT SET - Please configure it in Settings")
-        
-        if not API_AVAILABLE:
-            # Only complete recording if there was an active session
+        creds_ok, creds_error = stt_credentials_ok()
+        API_AVAILABLE = creds_ok
+        active_model = get_stt_model()
+
+        logger.info(f"🔑 STT Engine: {active_model} — {'✅ Ready' if creds_ok else '❌ Missing key'}")
+
+        if not creds_ok:
             if has_active_session:
-                window_manager.complete_recording(False, {"error": "API not available"})
+                window_manager.complete_recording(False, {"error": creds_error})
             return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
+                "error": creds_error,
+                "details": creds_error
             }), 503
         
         # Check if audio file is present
@@ -549,20 +611,16 @@ def transcribe_audio():
             else:
                 logger.info(f"⏭️ Step 5/6: Completed in {step_elapsed:.2f}s (no dictionary words)")
             
-            # Step 6/6: Transcribe using OpenAI Whisper API
-            logger.info(f"📍 Step 6/6: OpenAI transcription (max attempts: 3)")
+            # Step 6/6: Transcribe using selected STT engine
+            logger.info(f"📍 Step 6/6: Transcription via '{active_model}' (max attempts: 3)")
             step_start = time.time()
-            
+
             try:
-                openai_client = get_openai_client()
-                print(f"   OpenAI client: {type(openai_client).__name__ if openai_client else 'None'}")
-                
-                retry_result = transcribe_with_retry(
+                retry_result = run_transcription(
                     audio_file_path=temp_file_path,
-                    openai_client=openai_client,
-                    max_attempts=3,
                     prompt=whisper_prompt,
-                    audio_duration=audio_duration
+                    audio_duration=audio_duration,
+                    max_attempts=3,
                 )
                 
                 step_elapsed = time.time() - step_start
@@ -862,9 +920,9 @@ def save_transcription(data, audio_id=None, status='success', error_message=None
     local_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     cursor.execute('''
-        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message, source_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message, source_type))
+        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message, source_type, stt_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message, source_type, data.get('stt_model')))
 
     transcription_id = cursor.lastrowid
     conn.commit()
@@ -880,7 +938,7 @@ def get_transcriptions():
 
     cursor.execute('''
         SELECT id, text, created_at, language, duration, audio_id, status, error_message,
-               original_text, transformed_text, transform_label, source_type
+               original_text, transformed_text, transform_label, source_type, stt_model
         FROM transcriptions
         ORDER BY created_at DESC
     ''')
@@ -903,6 +961,7 @@ def get_transcriptions():
             'transformed_text': row[9] if len(row) > 9 else None,
             'transform_label': row[10] if len(row) > 10 else None,
             'source_type': row[11] if len(row) > 11 else 'standard',
+            'stt_model': row[12] if len(row) > 12 else None,
         })
 
     return transcriptions
@@ -948,7 +1007,7 @@ def get_transcription_by_audio_id(audio_id):
     
     cursor.execute('''
         SELECT id, text, created_at, language, duration, audio_id, status, error_message,
-               original_text, transformed_text, transform_label, source_type
+               original_text, transformed_text, transform_label, source_type, stt_model
         FROM transcriptions
         WHERE audio_id = ?
         ORDER BY created_at DESC
@@ -972,6 +1031,7 @@ def get_transcription_by_audio_id(audio_id):
             'transformed_text': row[9] if len(row) > 9 else None,
             'transform_label': row[10] if len(row) > 10 else None,
             'source_type': row[11] if len(row) > 11 else 'standard',
+            'stt_model': row[12] if len(row) > 12 else None,
         }
     return None
 
@@ -991,10 +1051,10 @@ def update_transcription(transcription_id, data, status='success', error_message
     cursor = conn.cursor()
     
     cursor.execute('''
-        UPDATE transcriptions 
-        SET text = ?, language = ?, duration = ?, status = ?, error_message = ?
+        UPDATE transcriptions
+        SET text = ?, language = ?, duration = ?, status = ?, error_message = ?, stt_model = ?
         WHERE id = ?
-    ''', (data['text'], data.get('language'), data.get('duration'), status, error_message, transcription_id))
+    ''', (data['text'], data.get('language'), data.get('duration'), status, error_message, data.get('stt_model'), transcription_id))
     
     affected_rows = cursor.rowcount
     conn.commit()
@@ -1060,44 +1120,41 @@ def retry_transcription():
     Returns: JSON with transcribed text or error details
     """
     try:
-        # Check if API is available
-        if not API_AVAILABLE:
-            return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
-            }), 503
-        
+        # Check credentials for the active STT engine
+        creds_ok, creds_error = stt_credentials_ok()
+        if not creds_ok:
+            return jsonify({"error": creds_error, "details": creds_error}), 503
+
         # Check if audio file is present
         if 'audio' not in request.files:
             return jsonify({"error": "No audio file provided"}), 400
-        
+
         audio_file = request.files['audio']
         if audio_file.filename == '':
             return jsonify({"error": "No file selected"}), 400
-        
+
         # Get max attempts from form data (default to 5 for manual retry)
         max_attempts = int(request.form.get('max_attempts', 5))
         max_attempts = min(max_attempts, 10)  # Cap at 10 attempts
-        
+
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
-        
+
         try:
             # Get audio duration for dynamic timeout calculation
             audio_duration = get_audio_duration(temp_file_path)
-            
+
             # Generate prompt from dictionary
             whisper_prompt = generate_whisper_prompt_from_dictionary()
-            
-            # Retry transcription with more attempts for manual retry
-            retry_result = transcribe_with_retry(
+
+            # Retry transcription using the active STT engine
+            retry_result = run_transcription(
                 audio_file_path=temp_file_path,
-                openai_client=get_openai_client(),
-                max_attempts=max_attempts,
                 prompt=whisper_prompt,
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                max_attempts=max_attempts,
             )
             
             # Clean up temporary file
@@ -1182,13 +1239,11 @@ def retry_audio_transcription(audio_id):
         JSON with updated transcription or error details
     """
     try:
-        # Check if API is available
-        if not API_AVAILABLE:
-            return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
-            }), 503
-        
+        # Check credentials for the active STT engine
+        creds_ok, creds_error = stt_credentials_ok()
+        if not creds_ok:
+            return jsonify({"error": creds_error, "details": creds_error}), 503
+
         # Get audio metadata
         storage = get_default_storage_manager()
         audio_info = storage.get_audio_info(audio_id)
@@ -1230,13 +1285,12 @@ def retry_audio_transcription(audio_id):
         # Generate prompt from dictionary
         whisper_prompt = generate_whisper_prompt_from_dictionary()
         
-        # Retry transcription
-        retry_result = transcribe_with_retry(
+        # Retry transcription using the active STT engine
+        retry_result = run_transcription(
             audio_file_path=audio_path,
-            openai_client=get_openai_client(),
-            max_attempts=max_attempts,
             prompt=whisper_prompt,
-            audio_duration=audio_duration
+            audio_duration=audio_duration,
+            max_attempts=max_attempts,
         )
         
         if retry_result.success:
@@ -1998,6 +2052,52 @@ def validate_api_key():
             "error": "Failed to validate API key",
             "details": str(e)
         }), 500
+
+# ----- Gemini API key endpoints -----
+
+@app.route('/api/config/gemini-key', methods=['GET'])
+def get_gemini_key_status():
+    """Return whether a Gemini API key is configured (masked)."""
+    try:
+        cm = get_default_config_manager()
+        key = cm.get_gemini_api_key()
+        if key:
+            masked = f"AIza·······{key[-4:]}" if len(key) > 10 else "AIza····****"
+            return jsonify({"has_api_key": True, "api_key_masked": masked})
+        return jsonify({"has_api_key": False, "api_key_masked": None})
+    except Exception as e:
+        return jsonify({"error": "Failed to read Gemini key status", "details": str(e)}), 500
+
+
+@app.route('/api/config/gemini-key', methods=['POST'])
+def set_gemini_key():
+    """Set the Gemini API key."""
+    try:
+        data = request.get_json() or {}
+        if 'api_key' not in data:
+            return jsonify({"error": "API key not provided"}), 400
+        api_key = data['api_key'].strip()
+        result = get_default_config_manager().set_gemini_api_key(api_key)
+        if result.get('valid') and result.get('saved'):
+            return jsonify({"success": True, "message": "Gemini API key saved", "validation": result})
+        return jsonify({"success": False, "validation": result}), 400
+    except Exception as e:
+        return jsonify({"error": "Failed to save Gemini key", "details": str(e)}), 500
+
+
+@app.route('/api/config/gemini-key', methods=['DELETE'])
+def delete_gemini_key():
+    """Remove the Gemini API key."""
+    try:
+        cm = get_default_config_manager()
+        if not cm.get_gemini_api_key():
+            return jsonify({"error": "No API key configured"}), 404
+        if cm.delete_gemini_api_key():
+            return jsonify({"success": True, "message": "Gemini API key removed"})
+        return jsonify({"error": "Failed to remove Gemini key"}), 500
+    except Exception as e:
+        return jsonify({"error": "Failed to remove Gemini key", "details": str(e)}), 500
+
 
 @app.route('/api/config/settings/<setting_key>', methods=['GET'])
 def get_setting(setting_key):
@@ -2916,7 +3016,9 @@ register_fluid_routes(
     get_openai_client=get_openai_client,
     generate_whisper_prompt=generate_whisper_prompt_from_dictionary,
     save_transcription_fn=save_transcription,
-    DATABASE_PATH=DATABASE_PATH
+    DATABASE_PATH=DATABASE_PATH,
+    transcribe_chunk_fn=run_transcription,
+    stt_credentials_check=stt_credentials_ok,
 )
 
 if __name__ == '__main__':

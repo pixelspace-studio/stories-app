@@ -361,6 +361,27 @@ class VoiceToTextApp {
         this.apiKeyConfiguredItem = document.getElementById('apiKeyConfiguredItem');
         this.changeApiKeyButton = document.getElementById('changeApiKeyButton');
         this.removeApiKeySettingsButton = document.getElementById('removeApiKeySettingsButton');
+        // Gemini API key UI
+        this.geminiKeySettingItem = document.getElementById('geminiKeySettingItem');
+        this.addGeminiKeyButton = document.getElementById('addGeminiKeyButton');
+        this.geminiKeyConfiguredItem = document.getElementById('geminiKeyConfiguredItem');
+        this.changeGeminiKeyButton = document.getElementById('changeGeminiKeyButton');
+        this.removeGeminiKeySettingsButton = document.getElementById('removeGeminiKeySettingsButton');
+        this.geminiKeyDisplay = document.getElementById('geminiKeyDisplay');
+        this.geminiKeyModal = document.getElementById('geminiKeyModal');
+        this.closeGeminiKeyModalBtn = document.getElementById('closeGeminiKeyModal');
+        this.geminiKeyInput = document.getElementById('geminiKeyInput');
+        this.submitGeminiKey = document.getElementById('submitGeminiKey');
+        this.submitGeminiKeyText = document.getElementById('submitGeminiKeyText');
+        this.geminiKeyModalTitle = document.getElementById('geminiKeyModalTitle');
+        this.geminiKeyInputLabel = document.getElementById('geminiKeyInputLabel');
+        this.currentGeminiKeySection = document.getElementById('currentGeminiKeySection');
+        this.currentGeminiKeyValue = document.getElementById('currentGeminiKeyValue');
+        this.removeGeminiKeyModal = document.getElementById('removeGeminiKeyModal');
+        this.closeRemoveGeminiKeyModalBtn = document.getElementById('closeRemoveGeminiKeyModal');
+        this.confirmRemoveGeminiKey = document.getElementById('confirmRemoveGeminiKey');
+        // STT model selector
+        this.sttModelSelect = document.getElementById('sttModelSelect');
         this.saveAudioToggle = document.getElementById('saveAudioToggle');
         this.soundEffectsToggle = document.getElementById('soundEffectsToggle');
         this.autoHideWidgetToggle = document.getElementById('autoHideWidgetToggle');
@@ -776,7 +797,62 @@ class VoiceToTextApp {
                 }
             });
         }
-        
+
+        // ----- Gemini API Key UI -----
+        if (this.addGeminiKeyButton) {
+            this.addGeminiKeyButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openGeminiKeyModal();
+            });
+        }
+        if (this.changeGeminiKeyButton) {
+            this.changeGeminiKeyButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openGeminiKeyModal();
+            });
+        }
+        if (this.closeGeminiKeyModalBtn) {
+            this.closeGeminiKeyModalBtn.addEventListener('click', () => this.closeGeminiKeyModal());
+        }
+        if (this.geminiKeyModal) {
+            this.geminiKeyModal.addEventListener('click', (e) => {
+                if (e.target === this.geminiKeyModal) this.closeGeminiKeyModal();
+            });
+        }
+        if (this.submitGeminiKey) {
+            this.submitGeminiKey.addEventListener('click', () => this.saveGeminiKey());
+        }
+        if (this.geminiKeyInput) {
+            this.geminiKeyInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.saveGeminiKey();
+            });
+        }
+        if (this.removeGeminiKeySettingsButton) {
+            this.removeGeminiKeySettingsButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openRemoveGeminiKeyModal();
+            });
+        }
+        if (this.closeRemoveGeminiKeyModalBtn) {
+            this.closeRemoveGeminiKeyModalBtn.addEventListener('click', () => this.closeRemoveGeminiKeyModal());
+        }
+        if (this.confirmRemoveGeminiKey) {
+            this.confirmRemoveGeminiKey.addEventListener('click', () => this.removeGeminiKey());
+        }
+        if (this.removeGeminiKeyModal) {
+            this.removeGeminiKeyModal.addEventListener('click', (e) => {
+                if (e.target === this.removeGeminiKeyModal) this.closeRemoveGeminiKeyModal();
+            });
+        }
+
+        // ----- STT model selector -----
+        if (this.sttModelSelect) {
+            this.sttModelSelect.addEventListener('change', () => this.setSttModel(this.sttModelSelect.value));
+        }
+
         // Alert Modal - OK button
         if (this.alertButton) {
             this.alertButton.addEventListener('click', () => {
@@ -1902,6 +1978,7 @@ class VoiceToTextApp {
         const timestamp = this.formatTimestamp(transcription.created_at);
         const sourceType = transcription.source_type || 'standard';
         const canTransform = !isError && sourceType !== 'realtime';
+        const sttModelTag = transcription.stt_model ? `<span class="stt-model-tag">(${this.escapeHtml(transcription.stt_model)})</span>` : '';
 
         // For error cards with audio_id, show retry button instead of copy
         // For error cards without audio_id, show neither copy nor retry
@@ -1949,7 +2026,7 @@ class VoiceToTextApp {
 
         card.innerHTML = `
             <div class="transcription-header">
-                <span class="transcription-timestamp">${errorIcon}${timestamp}${transformLabel}${sourceLabel}</span>
+                <span class="transcription-timestamp">${errorIcon}${timestamp} ${sttModelTag}${transformLabel}${sourceLabel}</span>
                 <div class="transcription-actions">
                     ${transformButton}
                     ${primaryButton}
@@ -2761,9 +2838,11 @@ class VoiceToTextApp {
     // Settings Panel Methods
     async openSettings() {
         console.log('⚙️ Opening settings panel');
-        
+
         // Load current settings
         this.checkApiKeyStatus();
+        this.checkGeminiKeyStatus();
+        this.loadSttModelSetting();
         
         // Wait for audio setting to load, then load stats if needed
         await this.loadAudioSaveSetting();
@@ -3733,6 +3812,156 @@ class VoiceToTextApp {
         }
     }
     
+    // ====================================
+    // Gemini API Key + STT model selector
+    // ====================================
+
+    async checkGeminiKeyStatus() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`);
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.has_api_key) {
+                this.geminiKeySettingItem?.classList.add('hidden');
+                this.geminiKeyConfiguredItem?.classList.remove('hidden');
+                if (this.geminiKeyDisplay) this.geminiKeyDisplay.textContent = data.api_key_masked || '';
+            } else {
+                this.geminiKeySettingItem?.classList.remove('hidden');
+                this.geminiKeyConfiguredItem?.classList.add('hidden');
+            }
+        } catch (e) {
+            console.error('❌ Error checking Gemini key status:', e);
+        }
+    }
+
+    async openGeminiKeyModal() {
+        if (!this.geminiKeyModal) return;
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`);
+            const data = await response.json();
+            if (data.has_api_key) {
+                this.geminiKeyModalTitle.textContent = 'Gemini API Key';
+                this.geminiKeyInputLabel.textContent = 'New Gemini API Key:';
+                this.submitGeminiKeyText.textContent = 'Change';
+                this.currentGeminiKeyValue.textContent = data.api_key_masked;
+                this.currentGeminiKeySection.classList.remove('hidden');
+            } else {
+                this.geminiKeyModalTitle.textContent = 'Add Gemini API Key';
+                this.geminiKeyInputLabel.textContent = 'Enter your Google Gemini API Key';
+                this.submitGeminiKeyText.textContent = 'Save API Key';
+                this.currentGeminiKeySection.classList.add('hidden');
+            }
+        } catch (e) {
+            this.geminiKeyModalTitle.textContent = 'Add Gemini API Key';
+        }
+        this.geminiKeyInput.value = '';
+        this.geminiKeyModal.classList.remove('hidden');
+        setTimeout(() => {
+            this.geminiKeyModal.classList.add('show');
+            this.geminiKeyInput?.focus();
+        }, 10);
+    }
+
+    closeGeminiKeyModal() {
+        if (!this.geminiKeyModal) return;
+        this.geminiKeyModal.classList.remove('show');
+        setTimeout(() => {
+            this.geminiKeyModal.classList.add('hidden');
+            if (this.geminiKeyInput) this.geminiKeyInput.value = '';
+        }, 200);
+    }
+
+    async saveGeminiKey() {
+        const apiKey = this.geminiKeyInput.value.trim();
+        if (!apiKey) {
+            this.showAlert('warning', 'Empty Field', 'Please enter a Gemini API Key');
+            return;
+        }
+        if (!apiKey.startsWith('AIza')) {
+            this.showAlert('error', 'Invalid Format', 'Gemini API keys typically start with "AIza".');
+            return;
+        }
+        try {
+            this.submitGeminiKey.disabled = true;
+            this.submitGeminiKeyText.textContent = 'Saving...';
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: apiKey })
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                this.closeGeminiKeyModal();
+                await this.checkGeminiKeyStatus();
+                this.showAlert('success', 'Success', 'Gemini API Key saved.');
+            } else {
+                const details = result.validation?.details || result.error || 'Invalid Gemini key';
+                this.showAlert('error', 'Save Failed', details);
+            }
+        } catch (e) {
+            console.error('❌ Error saving Gemini key:', e);
+            this.showAlert('error', 'Network Error', 'Please check your connection and try again.');
+        } finally {
+            this.submitGeminiKey.disabled = false;
+            this.submitGeminiKeyText.textContent = 'Save API Key';
+        }
+    }
+
+    openRemoveGeminiKeyModal() {
+        if (!this.removeGeminiKeyModal) return;
+        this.removeGeminiKeyModal.classList.remove('hidden');
+        setTimeout(() => this.removeGeminiKeyModal.classList.add('show'), 10);
+    }
+
+    closeRemoveGeminiKeyModal() {
+        if (!this.removeGeminiKeyModal) return;
+        this.removeGeminiKeyModal.classList.remove('show');
+        setTimeout(() => this.removeGeminiKeyModal.classList.add('hidden'), 200);
+    }
+
+    async removeGeminiKey() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`, { method: 'DELETE' });
+            if (response.ok) {
+                this.closeRemoveGeminiKeyModal();
+                await this.checkGeminiKeyStatus();
+                this.showToast('Gemini API Key removed', 'success');
+            } else {
+                const result = await response.json();
+                this.showToast(result.error || 'Failed to remove Gemini Key', 'error');
+            }
+        } catch (e) {
+            console.error('❌ Error removing Gemini key:', e);
+            this.showToast('Error removing Gemini Key', 'error');
+        }
+    }
+
+    async loadSttModelSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`);
+            if (response.ok) {
+                const data = await response.json();
+                const value = data.value || 'whisper';
+                if (this.sttModelSelect) this.sttModelSelect.value = value;
+            }
+        } catch (e) {
+            console.error('❌ Error loading STT model setting:', e);
+        }
+    }
+
+    async setSttModel(value) {
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+            console.log('🎙️ STT model set to:', value);
+        } catch (e) {
+            console.error('❌ Error saving STT model setting:', e);
+        }
+    }
+
     // Alert Modal Methods
     showAlert(type, title, message) {
         if (!this.alertModal) return;

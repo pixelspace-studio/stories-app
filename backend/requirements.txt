@@ -5,3 +5,4 @@ python-dotenv==1.0.0
 cryptography==41.0.7
 requests==2.32.4
 pydub==0.25.1
+google-genai==1.73.1

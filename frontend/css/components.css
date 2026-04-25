@@ -536,6 +536,12 @@
     color: var(--color-error);
 }
 
+.stt-model-tag {
+    font-size: var(--text-xs, 11px);
+    color: var(--gray-50, #888);
+    font-weight: 400;
+}
+
 .transcription-actions {
     display: flex;
     gap: var(--space-3);
@@ -818,6 +824,17 @@
     padding-right: var(--space-2);
 }
 
+/* Subtle subsection header inside Settings */
+.settings-section-header {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-xs, 11px);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--gray-50, #888);
+    padding: var(--space-3) var(--space-1) var(--space-1);
+}
+
 /* Scrollbar styling for settings */
 .settings-options::-webkit-scrollbar {
     width: 6px;
@@ -1051,6 +1068,40 @@
 
 .btn-gray:active {
     transform: scale(0.98);
+}
+
+/* Settings dropdown - matches btn-gray look */
+.setting-select {
+    background: var(--gray-20);
+    border: 0.5px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-xl);
+    padding: var(--space-1) var(--space-3);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: var(--text-base);
+    font-weight: 400;
+    color: var(--gray-70);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 12px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23666' d='M0 0l5 6 5-6z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    max-width: 160px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.setting-select:hover {
+    background-color: var(--gray-15);
+}
+
+/* Prevent setting labels from wrapping when controls are wide */
+.setting-label {
+    white-space: nowrap;
 }
 
 /* Link Button - Bold and underlined (no background) */

@@ -69,7 +69,8 @@ class ConfigurationManager:
                 'auto_paste': False,
                 'sound_effects_enabled': False,
                 'fluid_transcription': False,
-                'realtime_feed': False
+                'realtime_feed': False,
+                'stt_model': 'whisper'
             },
             'shortcuts': {
                 'record_toggle': 'CommandOrControl+Shift+R',
@@ -83,7 +84,7 @@ class ConfigurationManager:
         }
         
         # Secure configuration (encrypted)
-        self.secure_keys = ['openai_api_key', 'user_preferences']
+        self.secure_keys = ['openai_api_key', 'gemini_api_key', 'user_preferences']
         
         # Cache for configuration (avoid repeated file reads)
         self._config_cache = None
@@ -545,10 +546,42 @@ class ConfigurationManager:
             print(f"❌ Error deleting API key: {e}")
             return False
     
+    # ----- Gemini API key management -----
+
+    def validate_gemini_api_key(self, api_key: str) -> Dict[str, Any]:
+        """Lightweight validation for a Gemini API key (format only)."""
+        if not api_key or not api_key.strip():
+            return {'valid': False, 'error': 'API key is empty',
+                    'details': 'Please provide a valid Google Gemini API key'}
+        key = api_key.strip()
+        if not key.startswith('AIza') or len(key) < 30:
+            return {'valid': False, 'error': 'Invalid API key format',
+                    'details': 'Gemini API keys typically start with "AIza" and are ~39 chars'}
+        return {'valid': True, 'details': 'API key format looks valid'}
+
+    def get_gemini_api_key(self) -> Optional[str]:
+        return self.get_setting('gemini_api_key')
+
+    def set_gemini_api_key(self, api_key: str) -> Dict[str, Any]:
+        validation = self.validate_gemini_api_key(api_key)
+        if validation['valid']:
+            success = self.set_setting('gemini_api_key', api_key.strip())
+            validation['saved'] = bool(success)
+            if not success:
+                validation['error'] = 'Failed to save API key'
+        return validation
+
+    def delete_gemini_api_key(self) -> bool:
+        try:
+            return self.set_setting('gemini_api_key', '')
+        except Exception as e:
+            print(f"❌ Error deleting Gemini API key: {e}")
+            return False
+
     def get_all_settings(self) -> Dict[str, Any]:
         """Get all settings (excluding sensitive data for client)"""
         config = self.load_config()
-        
+
         # Remove sensitive data for client response
         client_config = config.copy()
         if 'openai_api_key' in client_config:
@@ -558,7 +591,15 @@ class ConfigurationManager:
                 masked = f"sk-·······{api_key[-4:]}" if len(api_key) > 10 else "sk-····****"
                 client_config['openai_api_key_masked'] = masked
             del client_config['openai_api_key']
-        
+
+        if 'gemini_api_key' in client_config:
+            gkey = client_config['gemini_api_key']
+            if gkey:
+                client_config['gemini_api_key_masked'] = (
+                    f"AIza·······{gkey[-4:]}" if len(gkey) > 10 else "AIza····****"
+                )
+            del client_config['gemini_api_key']
+
         return client_config
     
     def reset_to_defaults(self, keep_api_key: bool = True) -> bool:
@@ -579,7 +620,10 @@ class ConfigurationManager:
                 current_api_key = self.get_api_key()
                 if current_api_key:
                     config['openai_api_key'] = current_api_key
-            
+                current_gemini_key = self.get_gemini_api_key()
+                if current_gemini_key:
+                    config['gemini_api_key'] = current_gemini_key
+
             return self.save_config(config)
             
         except Exception as e:
@@ -600,6 +644,8 @@ class ConfigurationManager:
         
         if not include_api_key and 'openai_api_key' in config:
             del config['openai_api_key']
+        if not include_api_key and 'gemini_api_key' in config:
+            del config['gemini_api_key']
         
         return {
             'export_timestamp': '2025-09-26T10:00:00Z',
