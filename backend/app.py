@@ -2750,9 +2750,25 @@ TRANSFORM_PRESETS = [
     },
 ]
 
-TRANSFORM_SYSTEM_PROMPT = "You are a precise text transformation assistant. Apply the requested transformation exactly as instructed. Return only the transformed result — no preamble, no explanation, no commentary."
+PLAIN_TEXT_RULE = (
+    " Output format: plain text only by default — do NOT use Markdown syntax "
+    "(no **bold**, no _italic_, no `code`, no #headings, no bullet markers like '-' or '*', no tables, no links). "
+    "Use Markdown or any visual styling ONLY if the user's instruction explicitly opts in by asking for "
+    "Markdown, formatting, headings, bullets, bold, italics, code blocks, tables, or any other visual structure. "
+    "If the request is just to translate, summarize, rewrite, fix, condense, or otherwise transform text "
+    "without explicitly asking for visual structure, return raw plain text with normal punctuation only."
+)
 
-PROMPT_SYSTEM_PROMPT = "You are a helpful assistant. Respond directly and concisely to the user's request."
+TRANSFORM_SYSTEM_PROMPT = (
+    "You are a precise text transformation assistant. Apply the requested transformation exactly as instructed. "
+    "Return only the transformed result — no preamble, no explanation, no commentary."
+    + PLAIN_TEXT_RULE
+)
+
+PROMPT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Respond directly and concisely to the user's request."
+    + PLAIN_TEXT_RULE
+)
 
 def _get_dictionary_context():
     """Get dictionary words as context string for AI prompts."""
