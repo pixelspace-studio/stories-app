@@ -96,6 +96,28 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.9-3
+───────────────────────────────────────────────────────────────
+
+SMART TRANSFORMS (NEW)
+  • AI-powered text transformations on any transcription
+  • 7 built-in presets: Translate (ES/EN), Format Nicely,
+    Bullet Points, Structure, Summarize, Make Concise
+  • Custom transforms: describe what you want in your own words
+  • Full window: side-by-side panel with Accept/Dismiss flow
+  • Widget: 3-second countdown, quick-select dropdown, custom
+    voice instructions — all with blue accent
+  • Per-story transform labels, View Original, Restore Original
+  • Dictionary words injected into AI context for correct
+    spelling of proper nouns
+
+DOUBLE-TAP PROMPT MODE (NEW)
+  • Press recording shortcut twice quickly to ask AI a question
+  • Speak your prompt, get AI response on clipboard
+  • Red-to-blue visual transition confirms prompt mode
+  • Response saved as a story with your prompt as label
+
+
 📚 DOCUMENTATION
 ───────────────────────────────────────────────────────────────
 
@@ -105,7 +127,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.8
+Version: 0.9.9-3
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────
