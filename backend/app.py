@@ -388,38 +388,96 @@ STT_MODEL_LABELS = {
     'gemini-flash-lite': 'Gemini Flash Lite',
 }
 
+# Failures where the OTHER engine is worth trying. Auth errors are excluded
+# because the other engine has its own credentials — switching wouldn't help.
+FALLBACK_RETRY_REASONS = {
+    'server_error',
+    'rate_limit',
+    'network_error',
+    'api_timeout',
+    'unknown_error',
+}
 
-def run_transcription(audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
-    """
-    Dispatch transcription to the engine selected in settings.
 
-    Returns a RetryResult so callers can keep their existing flow.
-    The result.data dict is annotated with `stt_model` (friendly label)
-    so callers can persist which engine produced the transcription.
-    """
-    stt_model = get_stt_model()
-    label = STT_MODEL_LABELS.get(stt_model, stt_model)
-
+def _run_engine(stt_model: str, audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
+    """Invoke a single STT engine. Returns RetryResult."""
     if stt_model in GEMINI_MODELS:
         gemini_key = get_default_config_manager().get_gemini_api_key()
-        result = transcribe_with_gemini(
+        return transcribe_with_gemini(
             audio_file_path=audio_file_path,
             api_key=gemini_key,
             model=GEMINI_MODELS[stt_model],
             prompt=prompt,
             audio_duration=audio_duration,
         )
-    else:
-        result = transcribe_with_retry(
-            audio_file_path=audio_file_path,
-            openai_client=get_openai_client(),
-            max_attempts=max_attempts,
-            prompt=prompt,
-            audio_duration=audio_duration,
-        )
+    return transcribe_with_retry(
+        audio_file_path=audio_file_path,
+        openai_client=get_openai_client(),
+        max_attempts=max_attempts,
+        prompt=prompt,
+        audio_duration=audio_duration,
+    )
+
+
+def _engine_credentials_ok(stt_model: str) -> bool:
+    """Quick credential check for a specific engine."""
+    cm = get_default_config_manager()
+    if stt_model in GEMINI_MODELS:
+        return bool(cm.get_gemini_api_key())
+    return bool(get_api_key())
+
+
+def _pick_fallback_engine(primary: str) -> str | None:
+    """Pick the other engine to try if primary fails. None if no viable fallback."""
+    if primary in GEMINI_MODELS:
+        # Gemini failed → fall back to Whisper if OpenAI is configured
+        return 'whisper' if _engine_credentials_ok('whisper') else None
+    # Whisper failed → fall back to Gemini Flash Lite if Gemini key is configured
+    return 'gemini-flash-lite' if _engine_credentials_ok('gemini-flash-lite') else None
+
+
+def run_transcription(audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
+    """
+    Dispatch transcription to the engine selected in settings.
+
+    If the primary engine fails with a transient/server error AND the other
+    engine has credentials configured, transparently retry with that engine.
+    Auth errors do NOT trigger fallback (the other engine has its own key).
+
+    Returns a RetryResult so callers can keep their existing flow.
+    The result.data dict is annotated with `stt_model` (friendly label).
+    When fallback fired, the label includes "(fallback from <primary>)".
+    """
+    primary = get_stt_model()
+    primary_label = STT_MODEL_LABELS.get(primary, primary)
+
+    result = _run_engine(primary, audio_file_path, prompt, audio_duration, max_attempts)
+
+    if not result.success:
+        reason = result.retry_reason.value if result.retry_reason else 'unknown_error'
+        if reason in FALLBACK_RETRY_REASONS:
+            fallback = _pick_fallback_engine(primary)
+            if fallback:
+                fallback_label = STT_MODEL_LABELS.get(fallback, fallback)
+                logger.warning(
+                    f"⤺ STT fallback: {primary_label} failed ({reason}), "
+                    f"retrying with {fallback_label}"
+                )
+                fallback_result = _run_engine(fallback, audio_file_path, prompt, audio_duration, max_attempts)
+                if fallback_result.success and isinstance(fallback_result.data, dict):
+                    fallback_result.data['stt_model'] = (
+                        f"{fallback_label} (fallback from {primary_label})"
+                    )
+                    logger.info(f"✅ STT fallback succeeded with {fallback_label}")
+                    return fallback_result
+                # Fallback also failed — return the fallback's failure
+                logger.error(f"❌ STT fallback to {fallback_label} also failed")
+                return fallback_result
+            else:
+                logger.info(f"ℹ️ STT fallback skipped: no other engine configured")
 
     if result.success and isinstance(result.data, dict):
-        result.data['stt_model'] = label
+        result.data['stt_model'] = primary_label
 
     return result
 
@@ -928,7 +986,9 @@ def save_transcription(data, audio_id=None, status='success', error_message=None
     conn.commit()
     conn.close()
 
-    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} (status: {status}, audio_id: {audio_id}, source: {source_type})")
+    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} "
+          f"(status: {status}, audio_id: {audio_id}, source: {source_type}, "
+          f"stt_model: {data.get('stt_model') or 'unknown'})")
     return transcription_id
 
 def get_transcriptions():
@@ -3047,6 +3107,15 @@ if __name__ == '__main__':
     sys.stdout.flush()
     print("📍 Server will be available at: http://127.0.0.1:5002")
     print("🔧 API Status:", "Available" if API_AVAILABLE else "Not Available (missing API key)")
+    # STT setup snapshot — useful when diagnosing config-related transcription failures
+    try:
+        _active_stt = get_stt_model()
+        _active_label = STT_MODEL_LABELS.get(_active_stt, _active_stt)
+        _has_openai = 'yes' if get_api_key() else 'no'
+        _has_gemini = 'yes' if get_default_config_manager().get_gemini_api_key() else 'no'
+        print(f"🎙️  STT setup: active={_active_label} | openai_key={_has_openai} | gemini_key={_has_gemini}")
+    except Exception as _e:
+        print(f"⚠️  Could not log STT setup: {_e}")
     print(f"💾 Database: {DATABASE_PATH}")
     print("📍 Endpoints available:")
     print("   - GET  /api/health")

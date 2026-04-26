@@ -137,6 +137,12 @@ def transcribe_with_gemini(
             reason = RetryReason.RATE_LIMIT
         elif 'timeout' in lowered or 'timed out' in lowered:
             reason = RetryReason.API_TIMEOUT
+        elif ('unavailable' in lowered or 'overloaded' in lowered
+              or '503' in lowered or '502' in lowered or '504' in lowered
+              or 'internal error' in lowered or '500' in lowered):
+            reason = RetryReason.SERVER_ERROR
+        elif 'connection' in lowered or 'network' in lowered:
+            reason = RetryReason.NETWORK_ERROR
         else:
             reason = RetryReason.UNKNOWN_ERROR
 
