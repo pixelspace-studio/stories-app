@@ -107,34 +107,115 @@ class ConfigurationManager:
         return key
     
     def _get_machine_id(self) -> str:
-        """Get unique machine identifier for encryption"""
-        # Use hostname + user as basis for machine ID
-        machine_info = f"{os.uname().nodename}_{os.environ.get('USER', 'default')}"
+        """Get a stable machine identifier for encryption.
+
+        Uses pwd.getpwuid(os.getuid()).pw_name which is always available
+        regardless of how the process is launched. This avoids the previous
+        bug where packaged Electron apps lost user keys because USER was
+        unset in the launch environment and we silently fell back to
+        'default'.
+        """
+        try:
+            import pwd
+            user = pwd.getpwuid(os.getuid()).pw_name
+        except Exception:
+            # Fallback for non-POSIX (Windows) or weird envs
+            user = os.environ.get('USER') or os.environ.get('USERNAME') or 'default'
+        machine_info = f"{os.uname().nodename}_{user}"
         return hashlib.sha256(machine_info.encode()).hexdigest()[:16]
-    
+
+    def _legacy_machine_ids(self) -> list:
+        """Plausible OLD machine IDs we may have written secure.enc with.
+
+        Used only for migration: if the current ID fails to decrypt, try
+        these in order. If any succeeds, the caller re-encrypts with the
+        current ID so future loads are fast.
+        """
+        candidates = []
+        try:
+            # Cover every value `os.environ.get('USER', 'default')` could
+            # have returned across the various launch contexts (dev shell,
+            # packaged Electron app, Spotlight launch, etc.).
+            legacy_users = [
+                os.environ.get('USER'),       # whatever is set right now
+                os.environ.get('USERNAME'),   # Windows / weird envs
+                'default',                    # the historical fallback string
+                '',                            # USER explicitly empty
+            ]
+            try:
+                import pwd
+                legacy_users.append(pwd.getpwuid(os.getuid()).pw_name)
+            except Exception:
+                pass
+            for legacy_user in legacy_users:
+                if legacy_user is None:
+                    continue
+                info = f"{os.uname().nodename}_{legacy_user}"
+                candidates.append(hashlib.sha256(info.encode()).hexdigest()[:16])
+        except Exception:
+            pass
+        # Deduplicate while preserving order
+        seen = set()
+        out = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+        return out
+
     def _encrypt_data(self, data: Dict[str, Any]) -> bytes:
         """Encrypt sensitive data"""
         machine_id = self._get_machine_id()
         key = self._generate_key(machine_id)
         fernet = Fernet(key)
-        
+
         json_data = json.dumps(data).encode()
         encrypted_data = fernet.encrypt(json_data)
         return encrypted_data
-    
+
     def _decrypt_data(self, encrypted_data: bytes) -> Dict[str, Any]:
-        """Decrypt sensitive data"""
+        """Decrypt sensitive data, with one-time migration from legacy IDs.
+
+        If the current machine_id can't decrypt the data, try a small set
+        of plausible legacy IDs (env-USER variants). If any succeeds, the
+        secure file is re-encrypted with the current ID so subsequent
+        loads use the fast path and the user never has to re-enter keys.
+        """
+        current_id = self._get_machine_id()
+
+        # Fast path: current ID
         try:
-            machine_id = self._get_machine_id()
-            key = self._generate_key(machine_id)
-            fernet = Fernet(key)
-            
+            fernet = Fernet(self._generate_key(current_id))
             decrypted_data = fernet.decrypt(encrypted_data)
             return json.loads(decrypted_data.decode())
-        except Exception as e:
-            # Don't log as error - file might not exist on first run
-            logger.debug(f"Could not decrypt data: {e}")
-            return {}
+        except Exception as primary_err:
+            logger.debug(f"Could not decrypt with current machine_id: {primary_err}")
+
+        # Migration path: try each legacy ID
+        for legacy_id in self._legacy_machine_ids():
+            if legacy_id == current_id:
+                continue
+            try:
+                fernet = Fernet(self._generate_key(legacy_id))
+                decrypted_data = fernet.decrypt(encrypted_data)
+                payload = json.loads(decrypted_data.decode())
+                logger.warning(
+                    f"🔓 secure.enc decrypted with legacy machine_id — "
+                    f"re-encrypting with stable ID so this won't repeat"
+                )
+                # Re-encrypt with current ID
+                try:
+                    new_encrypted = self._encrypt_data(payload)
+                    with open(self.secure_file, 'wb') as f:
+                        f.write(new_encrypted)
+                    logger.info("✅ secure.enc migrated to stable machine_id")
+                except Exception as write_err:
+                    logger.warning(f"⚠️  Could not re-encrypt secure.enc: {write_err}")
+                return payload
+            except Exception:
+                continue
+
+        return {}
     
     def _deep_merge(self, base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
         """
