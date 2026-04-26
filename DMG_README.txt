@@ -101,15 +101,38 @@ LOCAL NETWORK (Required)
 
 GEMINI STT (NEW)
   • Choose your speech-to-text engine in Settings → STT model
-  • Three options: OpenAI Whisper, Gemini Flash, Gemini Flash Lite
+  • Two options: OpenAI Whisper or Gemini Flash Lite
   • Add your Google Gemini API key in Settings → API Keys
   • Each story is tagged with the engine that produced it
     (label appears next to the timestamp)
+
+CROSS-ENGINE FALLBACK (NEW)
+  • If the active engine fails with a transient error (server 5xx,
+    rate limit, network, timeout) and the other engine has a key
+    configured, the transcription is retried with that other engine
+    automatically — no failed stories
+  • The story label shows the truth, e.g.
+    "Whisper (fallback from Gemini Flash Lite)"
+  • Auth errors don't trigger fallback (your other key won't fix a
+    bad key on the failing engine)
 
 SMART TRANSFORMS — PLAIN TEXT BY DEFAULT
   • Transforms and prompt responses now return raw plain text
   • Markdown / headings / bullets are opt-in: only used when you
     explicitly ask for formatting in your instruction
+
+FIXES
+  • Lost-keys-after-install bug: the encrypted key file
+    (secure.enc) was tied to an environment variable that changes
+    depending on how the app is launched. After installing a new
+    build, recording could fail with 401 on every chunk even though
+    Settings still showed your key. Fixed by deriving the encryption
+    key from a stable user identifier; existing users get a one-time
+    transparent migration so they don't have to re-enter their keys.
+  • Gemini error categorisation: server 5xx responses are now
+    correctly classified as SERVER_ERROR (they previously fell
+    through to UNKNOWN_ERROR), so logs and the new cross-engine
+    fallback decision match the actual failure category.
 
 
 📝 CHANGELOG — v0.9.9-3
