@@ -1137,31 +1137,8 @@
     transform: scale(0.98);
 }
 
-/* STT model dropdown — pill-shaped, constrained width, sits inline
-   next to its label (overrides the full-width .setting-select default). */
-#sttModelSelect.setting-select {
-    width: auto;
-    margin-top: 0;
-    background: var(--gray-20);
-    border: 0.5px solid rgba(0, 0, 0, 0.1);
-    border-radius: var(--radius-xl);
-    padding: var(--space-1) var(--space-3);
-    color: var(--gray-70);
-    -webkit-app-region: no-drag;
-    padding-right: 12px;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='%23666' d='M0 0l5 6 5-6z'/></svg>");
-    background-position: right 6px center;
-    max-width: 160px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    overflow: hidden;
-    flex-shrink: 0;
-}
-
-#sttModelSelect.setting-select:hover {
-    background-color: var(--gray-15);
-    border-color: rgba(0, 0, 0, 0.1);
-}
+/* STT model dropdown uses the default .setting-select style (same as
+   the microphone selector) — no override needed. */
 
 /* Prevent setting labels from wrapping when controls are wide */
 .setting-label {
