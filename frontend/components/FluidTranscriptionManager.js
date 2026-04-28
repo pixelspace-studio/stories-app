@@ -34,9 +34,11 @@ class FluidTranscriptionManager {
         this.segments = [];        // Array of { index, text, status, language, duration }
         this.pendingChunks = [];   // Promises for in-flight transcriptions
         this._active = false;
+        this._paused = false;
 
         // Callbacks
         this._onSegmentTranscribed = null;
+        this.onSegment = null; // callback(text, segmentIndex)
     }
 
     /**
@@ -55,6 +57,7 @@ class FluidTranscriptionManager {
         this.pendingChunks = [];
         this.sampleBuffer = [];
         this._active = true;
+        this._paused = false;
 
         console.log(`🔄 Fluid transcription started: session=${this.sessionId}`);
 
@@ -97,6 +100,42 @@ class FluidTranscriptionManager {
             this._active = false;
             this._cleanup();
         }
+    }
+
+    /**
+     * Pause fluid transcription.
+     * Flushes current buffer, stops chunk timer, but keeps AudioContext alive.
+     */
+    pause() {
+        if (!this._active || this._paused) return;
+        this._paused = true;
+
+        // Stop chunk timer
+        if (this.chunkTimer) {
+            clearInterval(this.chunkTimer);
+            this.chunkTimer = null;
+        }
+
+        // Flush current buffer
+        this._sendChunk();
+
+        console.log('⏸ Fluid transcription paused');
+    }
+
+    /**
+     * Resume fluid transcription after pause.
+     * Restarts the chunk timer.
+     */
+    resume() {
+        if (!this._active || !this._paused) return;
+        this._paused = false;
+
+        // Restart chunk timer
+        this.chunkTimer = setInterval(() => {
+            this._sendChunk();
+        }, this.chunkDurationSec * 1000);
+
+        console.log('▶ Fluid transcription resumed');
     }
 
     /**
@@ -193,7 +232,7 @@ class FluidTranscriptionManager {
         // Minimum samples: at least 1 second of audio at source rate
         const minSamples = this.audioContext ? this.audioContext.sampleRate : 48000;
         if (this.sampleBuffer.length < minSamples) {
-            return; // Not enough audio, skip
+            return; // Not enough audio, skip (also avoids sending silence after pause flush)
         }
 
         // Take all buffered samples
@@ -211,6 +250,15 @@ class FluidTranscriptionManager {
         // Downsample to 16kHz mono
         const downsampled = this._downsample(rawSamples, sourceSampleRate, this.targetSampleRate);
 
+        // Silence detection: skip chunk if RMS energy is below threshold
+        // Prevents Whisper hallucinations on silent audio
+        const rms = this._calculateRMS(downsampled);
+        const SILENCE_THRESHOLD = 0.01; // ~-40dB, well below normal speech
+        if (rms < SILENCE_THRESHOLD) {
+            console.log(`🔇 Fluid: chunk skipped (silence detected, RMS=${rms.toFixed(4)})`);
+            return;
+        }
+
         // Encode as WAV
         const wavBlob = this._encodeWAV(downsampled, this.targetSampleRate);
 
@@ -223,6 +271,8 @@ class FluidTranscriptionManager {
     /**
      * POST a WAV chunk to the backend for transcription.
      * Retries up to 2 times on transient errors (total 3 attempts).
+     * Auth-style errors are NOT retried because the next attempt would
+     * just hit the same misconfigured key.
      */
     async _transcribeChunk(wavBlob, segmentIndex) {
         const MAX_ATTEMPTS = 3;
@@ -264,8 +314,15 @@ class FluidTranscriptionManager {
                     duration: result.duration || 0
                 });
 
+                // Fire onSegment callback (for agent feed panel)
+                if (this.onSegment) this.onSegment(result.text, segmentIndex);
+
                 if (this._onSegmentTranscribed) {
-                    this._onSegmentTranscribed({ index: segmentIndex, text: result.text, status: 'success' });
+                    this._onSegmentTranscribed({
+                        index: segmentIndex,
+                        text: result.text,
+                        status: 'success'
+                    });
                 }
                 return;
 
@@ -294,12 +351,19 @@ class FluidTranscriptionManager {
         });
 
         if (this._onSegmentTranscribed) {
-            this._onSegmentTranscribed({ index: segmentIndex, text: '', status: 'error', error: lastError.message });
+            this._onSegmentTranscribed({
+                index: segmentIndex,
+                text: '',
+                status: 'error',
+                error: lastError.message
+            });
         }
     }
 
     /**
      * Downsample Float32 samples from sourceSampleRate to targetSampleRate.
+     * Uses averaging over the source range per output sample so short
+     * sounds (consonants etc.) survive the rate drop.
      */
     _downsample(samples, sourceSampleRate, targetSampleRate) {
         if (sourceSampleRate === targetSampleRate) {
@@ -377,6 +441,18 @@ class FluidTranscriptionManager {
         for (let i = 0; i < string.length; i++) {
             view.setUint8(offset + i, string.charCodeAt(i));
         }
+    }
+
+    /**
+     * Calculate RMS (root mean square) energy of audio samples.
+     * Returns a value 0.0–1.0. Silent audio is near 0.
+     */
+    _calculateRMS(samples) {
+        let sum = 0;
+        for (let i = 0; i < samples.length; i++) {
+            sum += samples[i] * samples[i];
+        }
+        return Math.sqrt(sum / samples.length);
     }
 
     /**

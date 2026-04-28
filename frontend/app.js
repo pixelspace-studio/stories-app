@@ -67,17 +67,38 @@ class VoiceToTextApp {
         this.isCancelled = false;
         this.hasApiKey = false; // Track API key status
         this.safetyTimeout = null; // Safety timeout for max recording time
+        this.isRecordingPaused = false;
+        this.isAgentMuted = false;
+        this._pausedElapsed = 0;   // accumulated seconds before current pause
+        this._resumeTime = null;   // Date.now() when last resumed/started
 
         // Fluid Transcription
         this.fluidTranscription = null;  // Initialized after API ready
         this.isFluidEnabled = false;     // Loaded from settings
         this._fluidStopping = false;     // Guard flag for onstop handler
+
+        // Agent Feed (v2)
+        this.isRealtimeFeedEnabled = false;
+        this.agentFeedInterval = null;
+        this.agentFeedOffset = 0;
+        this.agentConnected = false;
+        this.agentSessionPath = null;
+        this._lastAgentPrompt = null;
+
+        // Agent Modes + Staging
+        this.agentModes = [];
+        this.selectedModeId = null;
+        this.isStagingActive = false;
+        this._lastHeartbeat = null;
+        this._stagingSessionId = null;
+        this._pendingAgentResponse = false;  // true when waiting for agent to respond
+        this._selectedModeProactive = true;  // current mode's proactive flag
         
         // 🔧 Recording configuration (received from main process)
         // These values are set by main.js to keep main window and widget in sync
         this.MAX_RECORDING_MINUTES = 20; // Default, will be overridden by config
         this.WARNING_AT_MINUTES = 15; // Default, will be overridden by config
-        this.LONG_RECORDING_MINUTES = 5; // Default, will be overridden by config
+        this.LONG_RECORDING_MINUTES = 12; // Default, will be overridden by config
         
         // 🎯 Progress indicator threshold for main window (in seconds)
         // Show phase descriptions (Uploading → Transcribing → Almost done) for audio >= this threshold
@@ -99,6 +120,12 @@ class VoiceToTextApp {
         this.registerModals(); // Register modals with ModalManager
         this.setupRecordingConfig(); // Listen for config from main process
         this.setupSettingsPanelListener(); // Listen for open settings from tray
+
+        // Ensure agent panel starts hidden
+        const agentPanel = document.getElementById('agentFeedPanel');
+        if (agentPanel) agentPanel.classList.add('hidden');
+        const tSec = document.querySelector('.transcriptions-section');
+        if (tSec) tSec.classList.remove('hidden');
     }
 
     // Receive recording configuration from main process
@@ -301,6 +328,7 @@ class VoiceToTextApp {
         this.statusText = document.getElementById('statusText');
         this.visualizer = document.getElementById('visualizer');
         this.cancelButton = document.getElementById('cancelButton');
+        this.pauseButton = document.getElementById('pauseButton');
         this.recordingInfo = document.getElementById('recordingInfo');
         
         // App container (for skeleton loader)
@@ -312,32 +340,13 @@ class VoiceToTextApp {
         this.gradientOverlay = document.getElementById('gradientOverlay');
         this.sectionTitle = document.querySelector('.section-title');
         
-        // Create View Less footer row dynamically (contains View Less button + stats + delete)
-        this.viewLessFooter = document.createElement('div');
-        this.viewLessFooter.className = 'view-less-footer hidden';
-
+        // Create View Less button dynamically
         this.showLessButton = document.createElement('button');
-        this.showLessButton.className = 'show-less-button';
+        this.showLessButton.className = 'show-less-button hidden';
         this.showLessButton.textContent = 'View less';
         this.showLessButton.addEventListener('click', () => {
             this.handleShowLess();
         });
-
-        // Stats + delete (right side of footer)
-        this.transcriptionStatsSection = document.createElement('div');
-        this.transcriptionStatsSection.className = 'transcription-stats-inline hidden';
-        this.transcriptionStatsText = document.createElement('span');
-        this.transcriptionStatsText.className = 'storage-stats-text';
-        this.clearHistoryButton = document.createElement('button');
-        this.clearHistoryButton.className = 'icon-button-delete';
-        this.clearHistoryButton.id = 'clearHistoryButton';
-        this.clearHistoryButton.title = 'Clear all transcriptions';
-        this.clearHistoryButton.innerHTML = '<i class="ph ph-trash"></i>';
-        this.transcriptionStatsSection.appendChild(this.transcriptionStatsText);
-        this.transcriptionStatsSection.appendChild(this.clearHistoryButton);
-
-        this.viewLessFooter.appendChild(this.showLessButton);
-        this.viewLessFooter.appendChild(this.transcriptionStatsSection);
         
         // Placeholder buttons
         this.shortcutsButton = document.getElementById('shortcutsButton');
@@ -352,6 +361,27 @@ class VoiceToTextApp {
         this.apiKeyConfiguredItem = document.getElementById('apiKeyConfiguredItem');
         this.changeApiKeyButton = document.getElementById('changeApiKeyButton');
         this.removeApiKeySettingsButton = document.getElementById('removeApiKeySettingsButton');
+        // Gemini API key UI
+        this.geminiKeySettingItem = document.getElementById('geminiKeySettingItem');
+        this.addGeminiKeyButton = document.getElementById('addGeminiKeyButton');
+        this.geminiKeyConfiguredItem = document.getElementById('geminiKeyConfiguredItem');
+        this.changeGeminiKeyButton = document.getElementById('changeGeminiKeyButton');
+        this.removeGeminiKeySettingsButton = document.getElementById('removeGeminiKeySettingsButton');
+        this.geminiKeyDisplay = document.getElementById('geminiKeyDisplay');
+        this.geminiKeyModal = document.getElementById('geminiKeyModal');
+        this.closeGeminiKeyModalBtn = document.getElementById('closeGeminiKeyModal');
+        this.geminiKeyInput = document.getElementById('geminiKeyInput');
+        this.submitGeminiKey = document.getElementById('submitGeminiKey');
+        this.submitGeminiKeyText = document.getElementById('submitGeminiKeyText');
+        this.geminiKeyModalTitle = document.getElementById('geminiKeyModalTitle');
+        this.geminiKeyInputLabel = document.getElementById('geminiKeyInputLabel');
+        this.currentGeminiKeySection = document.getElementById('currentGeminiKeySection');
+        this.currentGeminiKeyValue = document.getElementById('currentGeminiKeyValue');
+        this.removeGeminiKeyModal = document.getElementById('removeGeminiKeyModal');
+        this.closeRemoveGeminiKeyModalBtn = document.getElementById('closeRemoveGeminiKeyModal');
+        this.confirmRemoveGeminiKey = document.getElementById('confirmRemoveGeminiKey');
+        // STT model selector
+        this.sttModelSelect = document.getElementById('sttModelSelect');
         this.saveAudioToggle = document.getElementById('saveAudioToggle');
         this.soundEffectsToggle = document.getElementById('soundEffectsToggle');
         this.autoHideWidgetToggle = document.getElementById('autoHideWidgetToggle');
@@ -359,7 +389,9 @@ class VoiceToTextApp {
         this.instantRecordingToggle = document.getElementById('instantRecordingToggle');
         this.telemetryToggle = document.getElementById('telemetryToggle');
         this.fluidTranscriptionToggle = document.getElementById('fluidTranscriptionToggle');
-        this.microphoneSelect = document.getElementById('microphoneSelect');
+        this.realtimeFeedSettingItem = document.getElementById('realtimeFeedSettingItem');
+        this.realtimeFeedToggle = document.getElementById('realtimeFeedToggle');
+        this.copyFeedPathButton = document.getElementById('copyFeedPathButton');
         this.privacyPolicyLink = document.getElementById('privacyPolicyLink');
         
         // Audio Storage Section
@@ -408,7 +440,9 @@ class VoiceToTextApp {
         this.confirmClearAudio = document.getElementById('confirmClearAudio');
 
         // Clear Transcription History
-        // transcriptionStatsSection, transcriptionStatsText, and clearHistoryButton are created dynamically above
+        this.transcriptionStatsSection = document.getElementById('transcriptionStatsSection');
+        this.transcriptionStatsText = document.getElementById('transcriptionStatsText');
+        this.clearHistoryButton = document.getElementById('clearHistoryButton');
         this.clearHistoryModal = document.getElementById('clearHistoryModal');
         this.closeClearHistoryModal = document.getElementById('closeClearHistoryModal');
         this.confirmClearHistory = document.getElementById('confirmClearHistory');
@@ -455,6 +489,12 @@ class VoiceToTextApp {
     setupEventListeners() {
         // Record button
         this.recordButton.addEventListener('click', async () => {
+            // If staging is active, clicking record cancels staging
+            if (this.isStagingActive) {
+                this.hideAgentPanel();
+                this.isStagingActive = false;
+                return;
+            }
             if (this.isRecording) {
                 if (this.recordingSource === 'main') {
                     this.stopRecording();
@@ -490,18 +530,37 @@ class VoiceToTextApp {
             }
         });
 
+        // Transform apply button
+        const transformApplyBtn = document.getElementById('transformApplyBtn');
+        if (transformApplyBtn) {
+            transformApplyBtn.addEventListener('click', () => this.applyTransform());
+        }
+
         // Cancel button
         if (this.cancelButton) {
             this.cancelButton.addEventListener('click', (event) => {
                 event.stopPropagation();
                 event.preventDefault();
-                
+
                 if (this.recordingSource === 'main') {
                     this.cancelRecording();
                 } else if (this.recordingSource === 'widget') {
                     if (window.electronAPI && window.electronAPI.syncRecordingState) {
                         window.electronAPI.syncRecordingState('request_cancel_recording');
                     }
+                }
+            });
+        }
+
+        // Pause button
+        if (this.pauseButton) {
+            this.pauseButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                if (this.isRecordingPaused) {
+                    this.resumeRecording();
+                } else {
+                    this.pauseRecording();
                 }
             });
         }
@@ -738,7 +797,62 @@ class VoiceToTextApp {
                 }
             });
         }
-        
+
+        // ----- Gemini API Key UI -----
+        if (this.addGeminiKeyButton) {
+            this.addGeminiKeyButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openGeminiKeyModal();
+            });
+        }
+        if (this.changeGeminiKeyButton) {
+            this.changeGeminiKeyButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openGeminiKeyModal();
+            });
+        }
+        if (this.closeGeminiKeyModalBtn) {
+            this.closeGeminiKeyModalBtn.addEventListener('click', () => this.closeGeminiKeyModal());
+        }
+        if (this.geminiKeyModal) {
+            this.geminiKeyModal.addEventListener('click', (e) => {
+                if (e.target === this.geminiKeyModal) this.closeGeminiKeyModal();
+            });
+        }
+        if (this.submitGeminiKey) {
+            this.submitGeminiKey.addEventListener('click', () => this.saveGeminiKey());
+        }
+        if (this.geminiKeyInput) {
+            this.geminiKeyInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') this.saveGeminiKey();
+            });
+        }
+        if (this.removeGeminiKeySettingsButton) {
+            this.removeGeminiKeySettingsButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openRemoveGeminiKeyModal();
+            });
+        }
+        if (this.closeRemoveGeminiKeyModalBtn) {
+            this.closeRemoveGeminiKeyModalBtn.addEventListener('click', () => this.closeRemoveGeminiKeyModal());
+        }
+        if (this.confirmRemoveGeminiKey) {
+            this.confirmRemoveGeminiKey.addEventListener('click', () => this.removeGeminiKey());
+        }
+        if (this.removeGeminiKeyModal) {
+            this.removeGeminiKeyModal.addEventListener('click', (e) => {
+                if (e.target === this.removeGeminiKeyModal) this.closeRemoveGeminiKeyModal();
+            });
+        }
+
+        // ----- STT model selector -----
+        if (this.sttModelSelect) {
+            this.sttModelSelect.addEventListener('change', () => this.setSttModel(this.sttModelSelect.value));
+        }
+
         // Alert Modal - OK button
         if (this.alertButton) {
             this.alertButton.addEventListener('click', () => {
@@ -832,12 +946,32 @@ class VoiceToTextApp {
             });
         }
 
-        // Microphone select
-        if (this.microphoneSelect) {
-            this.microphoneSelect.addEventListener('change', () => {
-                this.updateMicrophoneSetting();
+        // Real-time Feed toggle
+        if (this.realtimeFeedToggle) {
+            this.realtimeFeedToggle.addEventListener('change', () => {
+                this.toggleRealtimeFeed();
             });
         }
+
+        // Copy Feed Path buttons (staging + active panel + inline)
+        document.getElementById('agentCopyPathBtnStaging')?.addEventListener('click', () => {
+            this.copyFeedPath();
+        });
+        document.getElementById('agentCopyPathBtnInline')?.addEventListener('click', () => {
+            this.copyFeedPath();
+        });
+
+        // Begin Story button (staging → active)
+        document.getElementById('agentBeginBtn')?.addEventListener('click', () => this.beginStory());
+
+        // Agent Mute button
+        document.getElementById('agentMuteBtn')?.addEventListener('click', () => {
+            if (this.isAgentMuted) {
+                this.unmuteAgent();
+            } else {
+                this.muteAgent();
+            }
+        });
 
         // Cleanup Audio link
         if (this.cleanupAudioButton) {
@@ -909,6 +1043,56 @@ class VoiceToTextApp {
                 }
             });
         }
+
+        // Agent chips
+        document.querySelectorAll('.agent-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (!this.agentFeedInterval) return; // only during recording
+                btn.classList.add('firing');
+                setTimeout(() => btn.classList.remove('firing'), 1200);
+                this.sendAgentPrompt(btn.dataset.prompt);
+            });
+        });
+
+        // Agent input
+        const agentInput = document.getElementById('agentInput');
+        const agentChips = document.getElementById('agentChips');
+
+        if (agentInput) {
+            agentInput.addEventListener('focus', () => agentChips?.classList.add('hidden-chips'));
+            agentInput.addEventListener('blur', () => {
+                if (!agentInput.value.trim()) agentChips?.classList.remove('hidden-chips');
+            });
+            agentInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const t = agentInput.value.trim();
+                    if (!t || !this.agentFeedInterval) return;
+                    agentInput.value = '';
+                    agentInput.style.height = '28px';
+                    agentChips?.classList.remove('hidden-chips');
+                    this.sendAgentPrompt(t);
+                }
+            });
+        }
+
+        // Agent send button
+        const agentSendBtn = document.getElementById('agentSendBtn');
+        if (agentSendBtn && agentInput) {
+            agentSendBtn.addEventListener('click', () => {
+                const t = agentInput.value.trim();
+                if (!t || !this.agentFeedInterval) return;
+                agentInput.value = '';
+                agentInput.style.height = '28px';
+                agentChips?.classList.remove('hidden-chips');
+                this.sendAgentPrompt(t);
+            });
+        }
+
+        // Story col toggle
+        document.getElementById('storyToggle')?.addEventListener('click', () => {
+            document.getElementById('storyCol')?.classList.toggle('collapsed');
+        });
     }
 
     async checkBackendConnection() {
@@ -988,7 +1172,19 @@ class VoiceToTextApp {
     async startRecording() {
         // Refresh fluid setting from backend before each recording
         await this.loadFluidTranscriptionSetting();
+        await this.loadRealtimeFeedSetting();
+        this.hideAgentPanel(); // reset panel for new session
 
+        // If both fluid + realtime feed are on, enter staging state instead of recording
+        if (this.isFluidEnabled && this.isRealtimeFeedEnabled) {
+            await this.enterStagingState();
+            return;
+        }
+
+        await this._startRecordingInternal();
+    }
+
+    async _startRecordingInternal() {
         // Check if API key is configured
         if (!this.hasApiKey) {
             this.showAlert('warning', 'API Key Required', 'Please add your OpenAI API Key in Settings before recording.');
@@ -1009,14 +1205,14 @@ class VoiceToTextApp {
             // STATE 1: Starting - show "starting" + timer at 00:00
             this.updateUIForStarting();
 
-            // Get media stream with preferred microphone
-            let audioConstraints;
-            try {
-                audioConstraints = await this.getPreferredAudioConstraints();
-            } catch {
-                audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-            }
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+            // Get media stream
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
+            });
             
             // Set up MediaRecorder
             this.mediaRecorder = new MediaRecorder(stream, {
@@ -1051,11 +1247,28 @@ class VoiceToTextApp {
             this.isRecording = true;
             this.recordingSource = 'main';
 
+            // Set up audio analyser for reactive visualizer
+            this._setupAudioAnalyser(stream);
+
             // Start fluid transcription if enabled
             console.log(`🔄 Main: fluid enabled=${this.isFluidEnabled}, manager=${!!this.fluidTranscription}`);
             if (this.isFluidEnabled && this.fluidTranscription) {
                 console.log('🔄 Main: Starting fluid transcription...');
                 this.fluidTranscription.start(stream);
+                // If we came from staging, override the session ID so feed stays in same dir
+                if (this._stagingSessionId) {
+                    this.fluidTranscription.sessionId = this._stagingSessionId;
+                }
+                if (this.isRealtimeFeedEnabled) {
+                    this.fluidTranscription.onSegment = (text, idx) => this._addStoryChunk(text, idx);
+                    if (this._stagingSessionId) {
+                        // Session already registered during staging — just start polling
+                        this._updateAgentStatus('broadcasting');
+                        this.agentFeedInterval = setInterval(() => this._pollAgentFeed(), 5000);
+                    } else {
+                        this.startAgentFeedPolling(this.fluidTranscription.sessionId);
+                    }
+                }
             } else {
                 console.log('🔄 Main: Fluid OFF — using classic mode');
             }
@@ -1075,6 +1288,17 @@ class VoiceToTextApp {
             this.updateUIForRecording();
             this.startTimer();
             
+            // In realtime feed mode, extend limits and suppress warnings
+            if (this.isRealtimeFeedEnabled && this.isFluidEnabled) {
+                this._realtimeOverride = true;
+                this._origMax = this.MAX_RECORDING_MINUTES;
+                this._origWarning = this.WARNING_AT_MINUTES;
+                this._origLong = this.LONG_RECORDING_MINUTES;
+                this.MAX_RECORDING_MINUTES = 60;
+                this.WARNING_AT_MINUTES = 999;
+                this.LONG_RECORDING_MINUTES = 999;
+            }
+
             // Safety timeout: auto force-stop after MAX_RECORDING_MINUTES
             const maxTimeMs = this.MAX_RECORDING_MINUTES * 60 * 1000;
             this.safetyTimeout = setTimeout(() => {
@@ -1135,10 +1359,26 @@ class VoiceToTextApp {
 
     async stopRecording() {
         if (this.mediaRecorder && this.isRecording && this.recordingSource === 'main') {
+            // If paused, resume MediaRecorder before stopping (required for clean stop)
+            if (this.isRecordingPaused && this.mediaRecorder.state === 'paused') {
+                this.mediaRecorder.resume();
+            }
+            this.isRecordingPaused = false;
+            this.isAgentMuted = false;
+            this._stopAudioAnalyser();
+
             // Clear safety timeout
             if (this.safetyTimeout) {
                 clearTimeout(this.safetyTimeout);
                 this.safetyTimeout = null;
+            }
+
+            // Restore original limits if overridden for realtime
+            if (this._realtimeOverride) {
+                this.MAX_RECORDING_MINUTES = this._origMax;
+                this.WARNING_AT_MINUTES = this._origWarning;
+                this.LONG_RECORDING_MINUTES = this._origLong;
+                this._realtimeOverride = false;
             }
 
             // Check if fluid transcription is active
@@ -1154,8 +1394,8 @@ class VoiceToTextApp {
             this.mediaRecorder.stop();
             this.isRecording = false;
 
-            // Calculate recording duration
-            const duration = this.startTime ? (Date.now() - this.startTime) / 1000 : 0;
+            // Calculate recording duration (excluding paused time)
+            const duration = this._getElapsedSeconds();
 
             // Track recording completed
             await this.telemetry.track('recording_completed', {
@@ -1183,6 +1423,9 @@ class VoiceToTextApp {
                 window.electronAPI.syncRecordingState('main_recording_stopped');
             }
 
+            // Stop agent feed polling
+            this.stopAgentFeedPolling();
+
             // If fluid was active, handle fluid stop flow
             if (fluidActive) {
                 this.handleFluidStop(duration);
@@ -1206,14 +1449,136 @@ class VoiceToTextApp {
 
         // Stop all audio tracks
         this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        this._stopAudioAnalyser();
 
         this.stopTimer();
         this.updateUIForIdle();
+        this.hideAgentPanel();
 
         // Notify widget
         if (window.electronAPI && window.electronAPI.syncRecordingState) {
             window.electronAPI.syncRecordingState('main_recording_cancelled');
         }
+    }
+
+    async pauseRecording() {
+        if (!this.isRecording || this.isRecordingPaused) return;
+
+        this.isRecordingPaused = true;
+
+        // Pause MediaRecorder
+        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+            this.mediaRecorder.pause();
+        }
+
+        // Flush and pause fluid transcription
+        if (this.fluidTranscription && this.fluidTranscription.isActive()) {
+            this.fluidTranscription.pause();
+        }
+
+        // Accumulate elapsed time and freeze timer
+        this._pausedElapsed += this._resumeTime ? (Date.now() - this._resumeTime) / 1000 : 0;
+        this._resumeTime = null;
+
+        // Write pause event to feed
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/pause`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ elapsed: this._pausedElapsed })
+            });
+        } catch (e) {
+            console.warn('Pause event send error:', e);
+        }
+
+        // Update UI
+        this.updateUIForPaused();
+        this._updateHeartbeatStatus();
+
+        console.log(`⏸ Recording paused at ${this._pausedElapsed.toFixed(1)}s`);
+    }
+
+    async resumeRecording() {
+        if (!this.isRecording || !this.isRecordingPaused) return;
+
+        this.isRecordingPaused = false;
+
+        // Resume MediaRecorder
+        if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
+            this.mediaRecorder.resume();
+        }
+
+        // Resume fluid transcription
+        if (this.fluidTranscription && this.fluidTranscription.isActive()) {
+            this.fluidTranscription.resume();
+        }
+
+        // Resume timer
+        this._resumeTime = Date.now();
+
+        // Write resume event to feed
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/resume`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (e) {
+            console.warn('Resume event send error:', e);
+        }
+
+        // Update UI
+        this.updateUIForRecording();
+        this._updateHeartbeatStatus();
+
+        console.log('▶ Recording resumed');
+    }
+
+    async muteAgent() {
+        this.isAgentMuted = true;
+
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/agent-mute`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (e) {
+            console.warn('Agent mute event send error:', e);
+        }
+
+        // Update mute button UI
+        const btn = document.getElementById('agentMuteBtn');
+        if (btn) {
+            btn.classList.add('muted');
+            btn.title = 'Unmute agent';
+            btn.querySelector('i').className = 'ph ph-speaker-slash';
+        }
+
+        this._updateHeartbeatStatus();
+        console.log('🔇 Agent muted');
+    }
+
+    async unmuteAgent() {
+        this.isAgentMuted = false;
+
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/agent-unmute`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } catch (e) {
+            console.warn('Agent unmute event send error:', e);
+        }
+
+        // Update mute button UI
+        const btn = document.getElementById('agentMuteBtn');
+        if (btn) {
+            btn.classList.remove('muted');
+            btn.title = 'Mute agent';
+            btn.querySelector('i').className = 'ph ph-speaker-high';
+        }
+
+        this._updateHeartbeatStatus();
+        console.log('🔊 Agent unmuted');
     }
 
     // 🚨 FORCE STOP MECHANISM - Emergency reset for unresponsive stop button
@@ -1484,6 +1849,7 @@ class VoiceToTextApp {
             if (data && data.transcriptions) {
                 this.renderTranscriptions(data.transcriptions);
                 this.updateTranscriptionStats(data.transcriptions.length);
+
             } else {
                 this.renderTranscriptions([]);
                 this.updateTranscriptionStats(0);
@@ -1506,7 +1872,7 @@ class VoiceToTextApp {
             
             // Different message based on API key status
             const emptyMessage = this.hasApiKey 
-                ? 'Click the microphone to record your first transcription'
+                ? 'Click the microphone to start telling your story.'
                 : 'Start recording, but first <a href="#" class="empty-state-link" id="emptyStateApiKeyLink">add your API key</a>';
             
             this.transcriptionsContainer.innerHTML = `
@@ -1532,10 +1898,10 @@ class VoiceToTextApp {
                 }, 0);
             }
             this.loadMoreButton.classList.add('hidden');
-            this.viewLessFooter.classList.add('hidden');
+            this.showLessButton.classList.add('hidden');
             this.gradientOverlay.classList.add('hidden');
             this.transcriptionsContainer.classList.remove('scrollable');
-
+            
             // Mark app as loaded (trigger crossfade from skeleton to empty state)
             this.markAppAsLoaded();
             return;
@@ -1556,12 +1922,12 @@ class VoiceToTextApp {
             fragment.appendChild(card);
         });
         
-        // Add View Less footer (with stats) at the end if showing all
+        // Add View Less button at the end if showing all
         if (this.showingAll) {
-            this.viewLessFooter.classList.remove('hidden');
-            fragment.appendChild(this.viewLessFooter);
+            this.showLessButton.classList.remove('hidden');
+            fragment.appendChild(this.showLessButton);
         } else {
-            this.viewLessFooter.classList.add('hidden');
+            this.showLessButton.classList.add('hidden');
         }
         
         // Single DOM insertion (optimized)
@@ -1569,24 +1935,24 @@ class VoiceToTextApp {
         
         // Check if content overflows after rendering
         setTimeout(() => {
-            // Show View More if there are >= initialDisplayCount transcriptions
-            // (at this window size, initialDisplayCount cards always overflow)
+            // PR #19: View More appears with >= initialDisplayCount (was >) so
+            // a fresh history of exactly 3 also triggers it. The previous
+            // overflow probe is no longer needed at this window size.
             const hasMoreTranscriptions = transcriptions.length >= this.initialDisplayCount;
-
             const shouldShowLoadMore = !this.showingAll && hasMoreTranscriptions;
-
+            
             if (this.showingAll) {
                 // Showing all: hide Load More, enable scroll
                 this.loadMoreButton.classList.add('hidden');
                 this.gradientOverlay.classList.add('hidden');
                 this.transcriptionsContainer.classList.add('scrollable');
             } else if (shouldShowLoadMore) {
-                // Has overflow or more content: show Load More, disable scroll
+                // Has overflow or more content: show Load More
                 this.loadMoreButton.classList.remove('hidden');
                 this.gradientOverlay.classList.remove('hidden');
                 this.transcriptionsContainer.classList.remove('scrollable');
             } else {
-                // Not enough transcriptions: hide both buttons, disable scroll
+                // No overflow and not many transcriptions: hide both buttons
                 this.loadMoreButton.classList.add('hidden');
                 this.gradientOverlay.classList.add('hidden');
                 this.transcriptionsContainer.classList.remove('scrollable');
@@ -1603,40 +1969,66 @@ class VoiceToTextApp {
         card.className = isError ? 'transcription-card error-card' : 'transcription-card';
         card.dataset.id = transcription.id;
         card.dataset.text = transcription.text; // Store text for copy action
-        
+
         // Store retry count for tracking (default 0)
         if (isError && transcription.audio_id) {
             card.dataset.retryCount = '0';
         }
 
         const timestamp = this.formatTimestamp(transcription.created_at);
-        
+        const sourceType = transcription.source_type || 'standard';
+        const canTransform = !isError && sourceType !== 'realtime';
+        const sttModelTag = transcription.stt_model ? `<span class="stt-model-tag">(${this.escapeHtml(transcription.stt_model)})</span>` : '';
+
         // For error cards with audio_id, show retry button instead of copy
         // For error cards without audio_id, show neither copy nor retry
         // For success cards, show copy button
         const errorIcon = isError ? '<i class="ph ph-warning-circle"></i>' : '';
-        
+
         let primaryButton = '';
         if (isError && transcription.audio_id) {
-            // Show retry button for errors with audio
             primaryButton = `
                 <button class="action-icon-button retry-button" title="Retry transcription" data-action="retry" data-audio-id="${transcription.audio_id}">
                     <i class="ph ph-arrows-clockwise"></i>
                 </button>
             `;
         } else if (!isError) {
-            // Show copy button for successful transcriptions
             primaryButton = `
                 <button class="action-icon-button copy-button" title="Copy to clipboard" data-action="copy">
                     <i class="ph ph-copy"></i>
                 </button>
             `;
         }
-        
+
+        // Transform button for eligible cards
+        const transformButton = canTransform ? `
+            <button class="action-icon-button transform-button" title="Transform" data-action="transform">
+                <i class="ph ph-magic-wand"></i>
+            </button>
+        ` : '';
+
+        // Transform label subtitle
+        const transformLabel = transcription.transform_label ? `
+            <span class="transform-label" title="${this.escapeHtml(transcription.transform_label)}">${this.escapeHtml(transcription.transform_label)}</span>
+        ` : '';
+
+        // Source type label for non-standard
+        const sourceLabel = sourceType === 'realtime' ? '<span class="transform-label" style="color: var(--gray-40);">Real-time transcription</span>' : '';
+
+        // View Original expandable + Restore Original
+        const viewOriginal = transcription.original_text ? `
+            <div class="original-actions">
+                <button class="view-original-btn" data-action="toggle-original">View Original</button>
+                <button class="restore-original-btn" data-action="restore-original">Restore Original</button>
+            </div>
+            <div class="original-text-content hidden">${this.escapeHtml(transcription.original_text)}</div>
+        ` : '';
+
         card.innerHTML = `
             <div class="transcription-header">
-                <span class="transcription-timestamp">${errorIcon}${timestamp}</span>
+                <span class="transcription-timestamp">${errorIcon}${timestamp} ${sttModelTag}${transformLabel}${sourceLabel}</span>
                 <div class="transcription-actions">
+                    ${transformButton}
                     ${primaryButton}
                     <button class="action-icon-button delete-button" title="Delete transcription" data-action="delete">
                         <i class="ph ph-trash"></i>
@@ -1649,6 +2041,7 @@ class VoiceToTextApp {
                 </div>
             </div>
             <div class="transcription-content ${isError ? 'error-text' : ''}">${this.escapeHtml(transcription.text)}</div>
+            ${viewOriginal}
         `;
 
         return card;
@@ -1657,15 +2050,38 @@ class VoiceToTextApp {
     setupTranscriptionEventDelegation() {
         // Event delegation: One listener for all transcription cards
         this.transcriptionsContainer.addEventListener('click', (e) => {
+            // Handle View Original toggle
+            const viewOrigBtn = e.target.closest('.view-original-btn');
+            if (viewOrigBtn) {
+                const actionsDiv = viewOrigBtn.closest('.original-actions');
+                const originalContent = actionsDiv?.nextElementSibling;
+                if (originalContent) {
+                    originalContent.classList.toggle('hidden');
+                    viewOrigBtn.textContent = originalContent.classList.contains('hidden') ? 'View Original' : 'Hide Original';
+                }
+                return;
+            }
+
+            // Handle Restore Original
+            const restoreBtn = e.target.closest('.restore-original-btn');
+            if (restoreBtn) {
+                const card = restoreBtn.closest('.transcription-card');
+                if (card) {
+                    const transcriptionId = card.dataset.id;
+                    this.restoreOriginal(parseInt(transcriptionId));
+                }
+                return;
+            }
+
             const button = e.target.closest('.action-icon-button');
             if (!button) return;
-            
+
             const action = button.dataset.action;
             const card = button.closest('.transcription-card');
             if (!card) return;
-            
+
             const transcriptionId = card.dataset.id;
-            
+
             switch(action) {
                 case 'copy':
                     const text = card.dataset.text;
@@ -1681,6 +2097,9 @@ class VoiceToTextApp {
                 case 'retry':
                     const retryAudioId = button.dataset.audioId;
                     this.retryTranscription(transcriptionId, retryAudioId, card, button);
+                    break;
+                case 'transform':
+                    this.openTransformPanel(parseInt(transcriptionId));
                     break;
             }
         });
@@ -2034,6 +2453,7 @@ class VoiceToTextApp {
         this.timer.textContent = '00:00';
         this.visualizer.classList.add('hidden');
         this.cancelButton.classList.add('hidden');
+        if (this.pauseButton) this.pauseButton.classList.add('hidden');
     }
 
     // STATE 2: Recording (timer + ondas + cancel + botón stop, sin texto)
@@ -2044,12 +2464,55 @@ class VoiceToTextApp {
         this.statusText.classList.add('hidden');
         this.visualizer.classList.remove('hidden');
         this.cancelButton.classList.remove('hidden');
+        // Show pause button only during an active agent/realtime session
+        const inAgentSession = this.isRealtimeFeedEnabled && this.isFluidEnabled && !!this._stagingSessionId;
+        if (this.pauseButton) {
+            if (inAgentSession) {
+                this.pauseButton.classList.remove('hidden');
+                this.pauseButton.innerHTML = '<span class="pause-bar"></span><span class="pause-bar"></span>';
+                this.pauseButton.title = 'Pause recording';
+            } else {
+                this.pauseButton.classList.add('hidden');
+            }
+        }
+        // Show inline copy-path button only during an active agent session
+        const copyPathInline = document.getElementById('agentCopyPathBtnInline');
+        if (copyPathInline) {
+            if (inAgentSession) {
+                copyPathInline.classList.remove('hidden');
+            } else {
+                copyPathInline.classList.add('hidden');
+            }
+        }
     }
 
     // STATE 3: Recording (after 3 seconds) - igual que recording
     updateUIForRecordingActive() {
         // Keep same as recording state
         this.statusText.classList.add('hidden');
+    }
+
+    // STATE: Paused (timer frozen, visualizer hidden, status "Paused")
+    updateUIForPaused() {
+        this.recordButton.classList.add('recording');
+        this.recordButton.innerHTML = '<div class="stop-square-main"></div>';
+        this.recordingInfo.classList.remove('hidden');
+        this.statusText.textContent = 'Paused';
+        this.statusText.classList.remove('hidden');
+        this.statusText.style.color = '';
+        this.visualizer.classList.add('hidden');
+        this.cancelButton.classList.remove('hidden');
+        // Switch pause button to play icon
+        if (this.pauseButton) {
+            this.pauseButton.classList.remove('hidden');
+            this.pauseButton.innerHTML = '<i class="ph ph-play"></i>';
+            this.pauseButton.title = 'Resume recording';
+        }
+        // Keep copy-path visible in paused state
+        const copyPathInline = document.getElementById('agentCopyPathBtnInline');
+        if (copyPathInline && this.isRealtimeFeedEnabled && this.isFluidEnabled) {
+            copyPathInline.classList.remove('hidden');
+        }
     }
 
     // STATE 4: Transcribing (timer + texto, sin ondas, sin cancel)
@@ -2062,7 +2525,11 @@ class VoiceToTextApp {
         this.statusText.classList.remove('hidden');
         this.visualizer.classList.add('hidden');
         this.cancelButton.classList.add('hidden');
-        
+        if (this.pauseButton) this.pauseButton.classList.add('hidden');
+        const copyPathInline = document.getElementById('agentCopyPathBtnInline');
+        if (copyPathInline) copyPathInline.classList.add('hidden');
+        this.isRecordingPaused = false;
+
         // Initialize transcription progress tracking
         this.transcriptionStartTime = Date.now();
         this.transcriptionProgressInterval = null;
@@ -2174,21 +2641,122 @@ class VoiceToTextApp {
         this.statusText.classList.add('hidden');
         this.visualizer.classList.add('hidden');
         this.cancelButton.classList.add('hidden');
-        
+        if (this.pauseButton) this.pauseButton.classList.add('hidden');
+        const copyPathInline = document.getElementById('agentCopyPathBtnInline');
+        if (copyPathInline) copyPathInline.classList.add('hidden');
+        this.isRecordingPaused = false;
+
         // Hide warning icon
         if (this.warningIcon) {
             this.warningIcon.classList.add('hidden');
         }
-        
+
         // Stop transcription progress tracking
         this.stopTranscriptionProgress();
     }
 
+    _setupAudioAnalyser(stream) {
+        try {
+            this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            this._analyser = this._audioCtx.createAnalyser();
+            this._analyser.fftSize = 256;
+            this._analyser.smoothingTimeConstant = 0.7;
+            const source = this._audioCtx.createMediaStreamSource(stream);
+            source.connect(this._analyser);
+            this._analyserSource = source;
+            this._analyserData = new Uint8Array(this._analyser.frequencyBinCount);
+            this._visualizerThreshold = 10; // minimum volume to animate
+            this._animateVisualizer();
+        } catch (e) {
+            console.warn('Audio analyser setup failed:', e);
+        }
+    }
+
+    _animateVisualizer() {
+        if (!this._analyser || !this.isRecording) return;
+        this._analyser.getByteFrequencyData(this._analyserData);
+        // Average volume from low-mid frequencies (most voice energy)
+        const slice = this._analyserData.slice(2, 20);
+        const avg = slice.reduce((a, b) => a + b, 0) / slice.length;
+
+        const waves = this.visualizer?.querySelectorAll('.wave');
+        if (waves && waves.length) {
+            const active = avg > this._visualizerThreshold;
+            const minH = 4;
+            const maxH = 18;
+            waves.forEach((wave, i) => {
+                // Remove CSS animation — we drive it manually
+                wave.style.animation = 'none';
+                if (active) {
+                    // Stagger using different frequency bands
+                    const bandStart = 2 + i * 6;
+                    const bandSlice = this._analyserData.slice(bandStart, bandStart + 6);
+                    const bandAvg = bandSlice.reduce((a, b) => a + b, 0) / bandSlice.length;
+                    const norm = Math.min(bandAvg / 128, 1);
+                    const h = minH + norm * (maxH - minH);
+                    wave.style.height = `${h}px`;
+                    // Turn pink when near max
+                    wave.style.background = norm > 0.7 ? 'var(--color-pink)' : '';
+                } else {
+                    wave.style.height = `${minH}px`;
+                    wave.style.background = '';
+                }
+            });
+        }
+        this._visualizerRaf = requestAnimationFrame(() => this._animateVisualizer());
+    }
+
+    _stopAudioAnalyser() {
+        if (this._visualizerRaf) {
+            cancelAnimationFrame(this._visualizerRaf);
+            this._visualizerRaf = null;
+        }
+        if (this._analyserSource) {
+            this._analyserSource.disconnect();
+            this._analyserSource = null;
+        }
+        if (this._audioCtx) {
+            this._audioCtx.close().catch(() => {});
+            this._audioCtx = null;
+        }
+        this._analyser = null;
+        // Reset wave styles
+        const waves = this.visualizer?.querySelectorAll('.wave');
+        if (waves) {
+            waves.forEach(w => { w.style.animation = ''; w.style.height = ''; w.style.background = ''; });
+        }
+    }
+
+    // Open a mic stream solely for the visualizer (used when widget owns the recording stream)
+    async _startVisualizerOnlyStream() {
+        try {
+            this._vizOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this._setupAudioAnalyser(this._vizOnlyStream);
+        } catch (e) {
+            console.warn('Could not open visualizer-only mic stream:', e);
+        }
+    }
+
+    _stopVisualizerOnlyStream() {
+        this._stopAudioAnalyser();
+        if (this._vizOnlyStream) {
+            this._vizOnlyStream.getTracks().forEach(t => t.stop());
+            this._vizOnlyStream = null;
+        }
+    }
+
+    _getElapsedSeconds() {
+        return this._pausedElapsed + (this._resumeTime ? (Date.now() - this._resumeTime) / 1000 : 0);
+    }
+
     startTimer() {
         this.startTime = Date.now();
+        this._pausedElapsed = 0;
+        this._resumeTime = Date.now();
         this.timerInterval = setInterval(() => {
-            const elapsed = Date.now() - this.startTime;
-            const seconds = Math.floor(elapsed / 1000);
+            const elapsedSec = this._getElapsedSeconds();
+            const elapsed = elapsedSec * 1000;
+            const seconds = Math.floor(elapsedSec);
             const minutes = Math.floor(seconds / 60); // For display only
             const displaySeconds = seconds % 60;
             
@@ -2270,9 +2838,11 @@ class VoiceToTextApp {
     // Settings Panel Methods
     async openSettings() {
         console.log('⚙️ Opening settings panel');
-        
+
         // Load current settings
         this.checkApiKeyStatus();
+        this.checkGeminiKeyStatus();
+        this.loadSttModelSetting();
         
         // Wait for audio setting to load, then load stats if needed
         await this.loadAudioSaveSetting();
@@ -2295,8 +2865,8 @@ class VoiceToTextApp {
         // Load fluid transcription setting
         await this.loadFluidTranscriptionSetting();
 
-        // Load microphone setting and populate dropdown
-        await this.loadMicrophoneSetting();
+        // Load real-time feed setting (depends on fluid state)
+        await this.loadRealtimeFeedSetting();
 
         // Open with ModalManager
         this.modalManager.open('settings', { delay: 10 });
@@ -2304,11 +2874,6 @@ class VoiceToTextApp {
 
     closeSettings() {
         console.log('⚙️ Closing settings panel');
-        // Remove device change listener when settings close
-        if (this._onDeviceChange) {
-            navigator.mediaDevices.removeEventListener('devicechange', this._onDeviceChange);
-            this._onDeviceChange = null;
-        }
         this.modalManager.close('settings');
     }
     
@@ -3170,6 +3735,8 @@ class VoiceToTextApp {
 
     async clearAllTranscriptions() {
         this.closeClearHistoryModalHandler();
+        // PR #19: reset paging state so View Less doesn't linger after
+        // clearing history and starting fresh.
         this.showingAll = false;
 
         this.clearHistoryButton.disabled = true;
@@ -3248,6 +3815,156 @@ class VoiceToTextApp {
         }
     }
     
+    // ====================================
+    // Gemini API Key + STT model selector
+    // ====================================
+
+    async checkGeminiKeyStatus() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`);
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.has_api_key) {
+                this.geminiKeySettingItem?.classList.add('hidden');
+                this.geminiKeyConfiguredItem?.classList.remove('hidden');
+                if (this.geminiKeyDisplay) this.geminiKeyDisplay.textContent = data.api_key_masked || '';
+            } else {
+                this.geminiKeySettingItem?.classList.remove('hidden');
+                this.geminiKeyConfiguredItem?.classList.add('hidden');
+            }
+        } catch (e) {
+            console.error('❌ Error checking Gemini key status:', e);
+        }
+    }
+
+    async openGeminiKeyModal() {
+        if (!this.geminiKeyModal) return;
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`);
+            const data = await response.json();
+            if (data.has_api_key) {
+                this.geminiKeyModalTitle.textContent = 'Gemini API Key';
+                this.geminiKeyInputLabel.textContent = 'New Gemini API Key:';
+                this.submitGeminiKeyText.textContent = 'Change';
+                this.currentGeminiKeyValue.textContent = data.api_key_masked;
+                this.currentGeminiKeySection.classList.remove('hidden');
+            } else {
+                this.geminiKeyModalTitle.textContent = 'Add Gemini API Key';
+                this.geminiKeyInputLabel.textContent = 'Enter your Google Gemini API Key';
+                this.submitGeminiKeyText.textContent = 'Save API Key';
+                this.currentGeminiKeySection.classList.add('hidden');
+            }
+        } catch (e) {
+            this.geminiKeyModalTitle.textContent = 'Add Gemini API Key';
+        }
+        this.geminiKeyInput.value = '';
+        this.geminiKeyModal.classList.remove('hidden');
+        setTimeout(() => {
+            this.geminiKeyModal.classList.add('show');
+            this.geminiKeyInput?.focus();
+        }, 10);
+    }
+
+    closeGeminiKeyModal() {
+        if (!this.geminiKeyModal) return;
+        this.geminiKeyModal.classList.remove('show');
+        setTimeout(() => {
+            this.geminiKeyModal.classList.add('hidden');
+            if (this.geminiKeyInput) this.geminiKeyInput.value = '';
+        }, 200);
+    }
+
+    async saveGeminiKey() {
+        const apiKey = this.geminiKeyInput.value.trim();
+        if (!apiKey) {
+            this.showAlert('warning', 'Empty Field', 'Please enter a Gemini API Key');
+            return;
+        }
+        if (!apiKey.startsWith('AIza')) {
+            this.showAlert('error', 'Invalid Format', 'Gemini API keys typically start with "AIza".');
+            return;
+        }
+        try {
+            this.submitGeminiKey.disabled = true;
+            this.submitGeminiKeyText.textContent = 'Saving...';
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: apiKey })
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                this.closeGeminiKeyModal();
+                await this.checkGeminiKeyStatus();
+                this.showAlert('success', 'Success', 'Gemini API Key saved.');
+            } else {
+                const details = result.validation?.details || result.error || 'Invalid Gemini key';
+                this.showAlert('error', 'Save Failed', details);
+            }
+        } catch (e) {
+            console.error('❌ Error saving Gemini key:', e);
+            this.showAlert('error', 'Network Error', 'Please check your connection and try again.');
+        } finally {
+            this.submitGeminiKey.disabled = false;
+            this.submitGeminiKeyText.textContent = 'Save API Key';
+        }
+    }
+
+    openRemoveGeminiKeyModal() {
+        if (!this.removeGeminiKeyModal) return;
+        this.removeGeminiKeyModal.classList.remove('hidden');
+        setTimeout(() => this.removeGeminiKeyModal.classList.add('show'), 10);
+    }
+
+    closeRemoveGeminiKeyModal() {
+        if (!this.removeGeminiKeyModal) return;
+        this.removeGeminiKeyModal.classList.remove('show');
+        setTimeout(() => this.removeGeminiKeyModal.classList.add('hidden'), 200);
+    }
+
+    async removeGeminiKey() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/gemini-key`, { method: 'DELETE' });
+            if (response.ok) {
+                this.closeRemoveGeminiKeyModal();
+                await this.checkGeminiKeyStatus();
+                this.showToast('Gemini API Key removed', 'success');
+            } else {
+                const result = await response.json();
+                this.showToast(result.error || 'Failed to remove Gemini Key', 'error');
+            }
+        } catch (e) {
+            console.error('❌ Error removing Gemini key:', e);
+            this.showToast('Error removing Gemini Key', 'error');
+        }
+    }
+
+    async loadSttModelSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`);
+            if (response.ok) {
+                const data = await response.json();
+                const value = data.value || 'whisper';
+                if (this.sttModelSelect) this.sttModelSelect.value = value;
+            }
+        } catch (e) {
+            console.error('❌ Error loading STT model setting:', e);
+        }
+    }
+
+    async setSttModel(value) {
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+            console.log('🎙️ STT model set to:', value);
+        } catch (e) {
+            console.error('❌ Error saving STT model setting:', e);
+        }
+    }
+
     // Alert Modal Methods
     showAlert(type, title, message) {
         if (!this.alertModal) return;
@@ -3629,104 +4346,6 @@ class VoiceToTextApp {
         }
     }
 
-    // ====================================
-    // MICROPHONE SELECTION
-    // ====================================
-
-    async loadMicrophoneSetting() {
-        try {
-            // Enumerate available audio input devices
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const audioInputs = devices.filter(d => d.kind === 'audioinput');
-
-            // Populate dropdown
-            const select = this.microphoneSelect;
-            // Keep only the default option, remove stale device entries
-            select.innerHTML = '<option value="default">System Default</option>';
-
-            for (const device of audioInputs) {
-                const option = document.createElement('option');
-                option.value = device.deviceId;
-                option.textContent = device.label || `Microphone (${device.deviceId.slice(0, 8)}...)`;
-                select.appendChild(option);
-            }
-
-            // Fetch saved preference from backend
-            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
-            if (response.ok) {
-                const data = await response.json();
-                const savedDeviceId = data.value || 'default';
-                console.log('🎙️ Saved microphone preference:', savedDeviceId);
-
-                // Check if saved device is still available
-                const deviceExists = savedDeviceId === 'default' || audioInputs.some(d => d.deviceId === savedDeviceId);
-                select.value = deviceExists ? savedDeviceId : 'default';
-
-                // If saved device disappeared, reset to default in backend
-                if (!deviceExists && savedDeviceId !== 'default') {
-                    console.log('🎙️ Saved microphone no longer available, resetting to default');
-                    this.updateMicrophoneSetting();
-                }
-            }
-
-            // Listen for device changes while settings panel is open
-            // Remove previous listener first to avoid stacking
-            if (this._onDeviceChange) {
-                navigator.mediaDevices.removeEventListener('devicechange', this._onDeviceChange);
-            }
-            this._onDeviceChange = () => this.loadMicrophoneSetting();
-            navigator.mediaDevices.addEventListener('devicechange', this._onDeviceChange);
-
-        } catch (error) {
-            console.error('❌ Error loading microphone setting:', error);
-        }
-    }
-
-    async updateMicrophoneSetting() {
-        const selectedDeviceId = this.microphoneSelect.value;
-        console.log('🎙️ Updating microphone preference to:', selectedDeviceId);
-
-        try {
-            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value: selectedDeviceId })
-            });
-
-            if (response.ok) {
-                console.log('✅ Microphone preference saved');
-            } else {
-                console.error('❌ Failed to save microphone preference');
-            }
-        } catch (error) {
-            console.error('❌ Error saving microphone preference:', error);
-        }
-    }
-
-    async getPreferredAudioConstraints() {
-        const constraints = {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-        };
-
-        try {
-            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
-            if (response.ok) {
-                const data = await response.json();
-                const deviceId = data.value;
-                if (deviceId && deviceId !== 'default') {
-                    constraints.deviceId = { exact: deviceId };
-                    console.log('🎙️ Using preferred microphone:', deviceId);
-                }
-            }
-        } catch (error) {
-            console.log('🎙️ Could not load mic preference, using system default');
-        }
-
-        return constraints;
-    }
-
     // Load auto-paste setting
     async loadAutoPasteSetting() {
         try {
@@ -3783,10 +4402,13 @@ class VoiceToTextApp {
                 if (this.fluidTranscriptionToggle) {
                     this.fluidTranscriptionToggle.checked = this.isFluidEnabled;
                 }
+                // Show/hide real-time feed setting based on fluid state
+                this.updateRealtimeFeedVisibility();
             }
         } catch (error) {
             console.error('❌ Error loading fluid transcription setting:', error);
             this.isFluidEnabled = false;
+            this.updateRealtimeFeedVisibility();
         }
     }
 
@@ -3801,8 +4423,78 @@ class VoiceToTextApp {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ value: isEnabled })
             });
+
+            // If fluid turned OFF, auto-disable real-time feed
+            if (!isEnabled && this.realtimeFeedToggle && this.realtimeFeedToggle.checked) {
+                this.realtimeFeedToggle.checked = false;
+                await this.toggleRealtimeFeed();
+            }
+            this.updateRealtimeFeedVisibility();
         } catch (error) {
             console.error('❌ Error saving fluid transcription setting:', error);
+        }
+    }
+
+    // ====================================
+    // REAL-TIME FEED
+    // ====================================
+
+    updateRealtimeFeedVisibility() {
+        if (this.realtimeFeedSettingItem) {
+            if (this.isFluidEnabled) {
+                this.realtimeFeedSettingItem.classList.remove('setting-disabled');
+                if (this.realtimeFeedToggle) this.realtimeFeedToggle.disabled = false;
+            } else {
+                this.realtimeFeedSettingItem.classList.add('setting-disabled');
+                if (this.realtimeFeedToggle) this.realtimeFeedToggle.disabled = true;
+            }
+        }
+    }
+
+    async loadRealtimeFeedSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.realtime_feed`);
+            if (response.ok) {
+                const data = await response.json();
+                const isEnabled = data.value || false;
+                console.log('📡 Current real-time feed setting:', isEnabled);
+                this.isRealtimeFeedEnabled = isEnabled;
+                if (this.realtimeFeedToggle) {
+                    this.realtimeFeedToggle.checked = isEnabled;
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error loading real-time feed setting:', error);
+            this.isRealtimeFeedEnabled = false;
+        }
+    }
+
+    async toggleRealtimeFeed() {
+        const isEnabled = this.realtimeFeedToggle ? this.realtimeFeedToggle.checked : false;
+        console.log('📡 Real-time feed toggled:', isEnabled);
+
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.realtime_feed`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: isEnabled })
+            });
+        } catch (error) {
+            console.error('❌ Error saving real-time feed setting:', error);
+        }
+    }
+
+    async copyFeedPath() {
+        try {
+            const path = this.agentSessionPath;
+            if (path) {
+                const sessionId = path.split('/').pop();
+                await navigator.clipboard.writeText(`Listen to this feed: ${sessionId}`);
+                this.showToast('Feed path copied', 'success');
+            }
+        } catch (error) {
+            console.error('❌ Error copying feed path:', error);
+            this.showToast('Failed to copy feed path', 'error');
         }
     }
 
@@ -3886,6 +4578,7 @@ class VoiceToTextApp {
                 // Update UI
                 this.updateUIForIdle();
                 await this.loadTranscriptionHistory();
+                this.hideAgentPanel();
 
                 // Auto-paste
                 this.attemptAutoPaste(completeData.text);
@@ -3901,6 +4594,7 @@ class VoiceToTextApp {
         } catch (error) {
             console.error('❌ Fluid stop error:', error);
             this.updateUIForIdle();
+            this.hideAgentPanel();
             this.showToast('Error processing fluid transcription. Please try again.', 'error');
             await this.loadTranscriptionHistory();
 
@@ -3996,12 +4690,22 @@ class VoiceToTextApp {
     setupWidgetSync() {
         if (window.electronAPI && window.electronAPI.onSyncRecordingState) {
         const appInstance = this;
-        
+
             window.electronAPI.onSyncRecordingState(async function(event, message) {
                 // Sync message received
-                
+
                 if (message === 'transcription_completed') {
                     await appInstance.loadTranscriptionHistory();
+                }
+            });
+        }
+
+        // Listen for triple-tap transform trigger from main process
+        if (window.electronAPI && window.electronAPI.onOpenTransformDropdown) {
+            window.electronAPI.onOpenTransformDropdown((event, transcriptionId) => {
+                const targetId = transcriptionId;
+                if (targetId) {
+                    this.openTransformPanel(targetId);
                 }
             });
         }
@@ -4023,6 +4727,8 @@ class VoiceToTextApp {
                     appInstance.isRecording = true;
                     appInstance.updateUIForRecording();
                     appInstance.startTimer();
+                    // Get a mic stream just for the visualizer (widget owns the real recording stream)
+                    appInstance._startVisualizerOnlyStream();
                     // After 3 seconds, hide "recording" text
                     setTimeout(() => {
                         if (appInstance.isRecording) {
@@ -4032,6 +4738,7 @@ class VoiceToTextApp {
                 } else if (message === 'widget_recording_stopped') {
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.updateUIForTranscribing();
                     appInstance.stopTimer();
                     
@@ -4081,6 +4788,7 @@ class VoiceToTextApp {
                 } else if (message === 'widget_recording_cancelled') {
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.stopTimer();
                     appInstance.updateUIForIdle();
                 } else if (message === 'widget_force_stopped') {
@@ -4088,6 +4796,7 @@ class VoiceToTextApp {
                     // Depending on the reason, it may have transcribed or cancelled
                     appInstance.recordingSource = null;
                     appInstance.isRecording = false;
+                    appInstance._stopVisualizerOnlyStream();
                     appInstance.stopTimer();
                     // Show transcribing state first (in case it's transcribing)
                     // If it was cancelled, the widget will send widget_recording_cancelled next
@@ -4114,6 +4823,814 @@ class VoiceToTextApp {
                 }
             });
         }
+    }
+
+    // --- Smart Transforms ---
+
+    async initTransformPanel() {
+        // Cache presets on first call
+        if (!this._transformPresets) {
+            try {
+                const response = await fetch(`${this.backendUrl}/api/transform/presets`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this._transformPresets = data.presets;
+                }
+            } catch (error) {
+                console.error('Error loading transform presets:', error);
+            }
+        }
+    }
+
+    async openTransformPanel(transcriptionId) {
+        await this.initTransformPanel();
+        if (!this._transformPresets) return;
+
+        // Find transcription in our loaded data
+        this._transformTargetId = transcriptionId;
+        let transcription = null;
+        try {
+            const response = await fetch(`${this.backendUrl}/api/history`);
+            if (response.ok) {
+                const data = await response.json();
+                transcription = data.transcriptions.find(t => t.id === transcriptionId);
+            }
+        } catch (error) {
+            console.error('Error fetching transcription:', error);
+            return;
+        }
+        if (!transcription) return;
+
+        this._transformTranscription = transcription;
+
+        // Populate original text panel
+        // Left panel shows current text (which may be the latest transform result)
+        document.getElementById('transformOriginalText').textContent = transcription.text;
+        const leftTitle = document.getElementById('transformLeftTitle');
+        if (leftTitle) {
+            leftTitle.textContent = transcription.original_text ? 'Current' : 'Original';
+        }
+
+        // Reset result panel
+        document.getElementById('transformResultText').innerHTML = '<span class="transform-placeholder">Select a transform and apply</span>';
+
+
+        // Render pills
+        const pillsContainer = document.getElementById('transformPills');
+        pillsContainer.innerHTML = '';
+        this._selectedTransformPreset = null;
+
+        for (const preset of this._transformPresets) {
+            const pill = document.createElement('button');
+            pill.className = 'transform-pill';
+            pill.textContent = preset.label;
+            pill.dataset.presetId = preset.id;
+            pill.addEventListener('click', () => this._selectTransformPill(pill, preset));
+            pillsContainer.appendChild(pill);
+        }
+
+        // Reset custom prompt
+        document.getElementById('transformCustomPrompt').classList.add('hidden');
+        const customInput = document.getElementById('transformCustomInput');
+        if (customInput) customInput.value = '';
+
+        // Reset apply button
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.disabled = true;
+        applyBtn.classList.remove('processing');
+        applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+        applyBtn.style.display = '';
+
+        // Reset pills visibility
+        const pillsEl = document.getElementById('transformPills');
+        if (pillsEl) pillsEl.style.display = '';
+
+        // Clean up previous action row
+        const prevActionRow = document.getElementById('transformActionRow');
+        if (prevActionRow) prevActionRow.remove();
+
+        // Reset state flags
+        this._transformApplied = false;
+        this._transformAccepted = false;
+        this._pendingTransformResult = null;
+
+        // Show transform panel, hide transcriptions
+        const appContainer = document.getElementById('appContainer');
+        appContainer.classList.add('transform-mode');
+        document.getElementById('transformPanel').classList.remove('hidden');
+
+        // Change title
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull) {
+            if (!this._originalTitleHTML) this._originalTitleHTML = titleFull.innerHTML;
+            titleFull.innerHTML = 'Transform your <span class="title-bold">stories</span><span class="title-dot">.</span>';
+        }
+
+        // Add back button (same pattern as staging mode — inside header-left as first child)
+        this._addTransformBackButton();
+
+        // Hide record button
+        this.recordButton.classList.add('hidden');
+    }
+
+    _selectTransformPill(pill, preset) {
+        // Deselect all pills
+        document.querySelectorAll('.transform-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        this._selectedTransformPreset = preset;
+
+        // Show/hide custom prompt
+        const customBox = document.getElementById('transformCustomPrompt');
+        if (preset.id === 'custom') {
+            customBox.classList.remove('hidden');
+            document.getElementById('transformCustomInput').focus();
+        } else {
+            customBox.classList.add('hidden');
+        }
+
+        // Enable apply button
+        document.getElementById('transformApplyBtn').disabled = false;
+    }
+
+    _addTransformBackButton() {
+        const headerLeft = document.querySelector('.header-left');
+        if (headerLeft && !document.getElementById('transformBackBtn')) {
+            const backBtn = document.createElement('button');
+            backBtn.id = 'transformBackBtn';
+            backBtn.className = 'agent-back-btn';
+            backBtn.innerHTML = '<i class="ph ph-arrow-left"></i> Back to recent transcriptions';
+            backBtn.addEventListener('click', () => this.closeTransformPanel());
+            headerLeft.insertBefore(backBtn, headerLeft.firstChild);
+        }
+    }
+
+    async applyTransform() {
+        const preset = this._selectedTransformPreset;
+        if (!preset) return;
+
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.classList.add('processing');
+        applyBtn.innerHTML = '<i class="ph ph-circle-notch"></i> Applying...';
+        applyBtn.disabled = true;
+
+        // Build request — always transform current text
+        const body = {
+            transcription_id: this._transformTargetId,
+            source: 'current',
+        };
+
+        if (preset.id === 'custom') {
+            body.custom_prompt = document.getElementById('transformCustomInput').value.trim();
+            if (!body.custom_prompt) {
+                applyBtn.classList.remove('processing');
+                applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+                applyBtn.disabled = false;
+                return;
+            }
+        } else {
+            body.preset_id = preset.id;
+        }
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/transform/apply`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                // Show result in right panel
+                document.getElementById('transformResultText').textContent = result.transformed_text;
+                this._pendingTransformResult = result.transformed_text;
+                this._transformApplied = true;
+
+                // Hide apply button, show accept/dismiss buttons
+                applyBtn.style.display = 'none';
+
+                // Hide pills and custom prompt (no longer needed)
+                document.getElementById('transformPills').style.display = 'none';
+                document.getElementById('transformCustomPrompt').classList.add('hidden');
+
+                const footer = document.querySelector('.transform-footer');
+                let actionRow = document.getElementById('transformActionRow');
+                if (!actionRow) {
+                    actionRow = document.createElement('div');
+                    actionRow.id = 'transformActionRow';
+                    actionRow.className = 'transform-action-row';
+                    actionRow.innerHTML = `
+                        <button class="transform-accept-btn" id="transformAcceptBtn">
+                            <i class="ph ph-check"></i> Accept Transform
+                        </button>
+                        <button class="transform-dismiss-btn" id="transformDismissBtn">
+                            Dismiss
+                        </button>
+                    `;
+                    footer.appendChild(actionRow);
+
+                    document.getElementById('transformAcceptBtn').addEventListener('click', () => this.acceptTransform());
+                    document.getElementById('transformDismissBtn').addEventListener('click', () => this.dismissTransform());
+                } else {
+                    actionRow.style.display = '';
+                }
+            } else {
+                // Error
+                applyBtn.classList.remove('processing');
+                applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+                applyBtn.disabled = false;
+                console.error('Transform error:', result.error);
+
+                // Show error in result panel
+                document.getElementById('transformResultText').innerHTML =
+                    `<span class="transform-placeholder" style="color: var(--color-pink);">${this.escapeHtml(result.error || 'Transform failed')}</span>`;
+            }
+        } catch (error) {
+            console.error('Transform request failed:', error);
+            applyBtn.classList.remove('processing');
+            applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+            applyBtn.disabled = false;
+            document.getElementById('transformResultText').innerHTML =
+                '<span class="transform-placeholder" style="color: var(--color-pink);">Network error — please try again</span>';
+        }
+    }
+
+    async acceptTransform() {
+        // Copy to clipboard
+        if (this._pendingTransformResult) {
+            try {
+                await navigator.clipboard.writeText(this._pendingTransformResult);
+            } catch (err) {
+                console.warn('Clipboard write failed:', err);
+            }
+        }
+        this._transformApplied = false;
+        this._transformAccepted = true;
+        this.closeTransformPanel();
+    }
+
+    async dismissTransform() {
+        // Revert the transform in the DB
+        if (this._transformTargetId) {
+            try {
+                await fetch(`${this.backendUrl}/api/transform/revert/${this._transformTargetId}`, {
+                    method: 'POST'
+                });
+            } catch (err) {
+                console.warn('Revert failed:', err);
+            }
+        }
+        this._transformApplied = false;
+        this._transformAccepted = false;
+
+        // Stay on panel — reset UI for another try
+        document.getElementById('transformResultText').innerHTML = '<span class="transform-placeholder">Select a transform and apply</span>';
+
+        // Hide accept/dismiss, show pills + apply button again
+        const actionRow = document.getElementById('transformActionRow');
+        if (actionRow) actionRow.style.display = 'none';
+
+        const applyBtn = document.getElementById('transformApplyBtn');
+        applyBtn.style.display = '';
+        applyBtn.style.background = '';
+        applyBtn.classList.remove('processing');
+        applyBtn.disabled = true;
+        applyBtn.innerHTML = '<i class="ph ph-magic-wand"></i> Apply Transform';
+
+        document.getElementById('transformPills').style.display = '';
+
+        // Deselect pills
+        document.querySelectorAll('.transform-pill').forEach(p => p.classList.remove('active'));
+        this._selectedTransformPreset = null;
+        document.getElementById('transformCustomPrompt').classList.add('hidden');
+    }
+
+    closeTransformPanel() {
+        // If transform was applied but not accepted, revert it
+        if (this._transformApplied && !this._transformAccepted) {
+            this.dismissTransform();
+            return; // dismissTransform will call closeTransformPanel again after revert
+        }
+
+        const appContainer = document.getElementById('appContainer');
+        appContainer.classList.remove('transform-mode');
+        document.getElementById('transformPanel').classList.add('hidden');
+
+        // Remove back button
+        document.getElementById('transformBackBtn')?.remove();
+
+        // Clean up action row
+        const actionRow = document.getElementById('transformActionRow');
+        if (actionRow) actionRow.remove();
+
+        // Reset apply button
+        const applyBtn = document.getElementById('transformApplyBtn');
+        if (applyBtn) {
+            applyBtn.style.display = '';
+            applyBtn.style.background = '';
+        }
+
+        // Reset pills visibility
+        const pills = document.getElementById('transformPills');
+        if (pills) pills.style.display = '';
+
+        // Restore title
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull && this._originalTitleHTML) {
+            titleFull.innerHTML = this._originalTitleHTML;
+        }
+
+        // Restore record button
+        this.recordButton.classList.remove('hidden');
+
+        // Reset state
+        this._transformApplied = false;
+        this._transformAccepted = false;
+        this._pendingTransformResult = null;
+
+        // Reload history to reflect changes
+        this.loadTranscriptionHistory();
+    }
+
+    async restoreOriginal(transcriptionId) {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/transform/revert/${transcriptionId}`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                await this.loadTranscriptionHistory();
+            }
+        } catch (err) {
+            console.error('Restore original failed:', err);
+        }
+    }
+
+
+    // --- Agent Modes + Staging ---
+
+    async enterStagingState() {
+        await this.loadAgentModes();
+
+        // Generate session ID early so user can copy feed path
+        this._stagingSessionId = crypto.randomUUID();
+
+        // Register feed session immediately
+        try {
+            const res = await fetch(`${this.backendUrl}/api/feeds/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: this._stagingSessionId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                this.agentSessionPath = data.path;
+            }
+        } catch (e) {
+            console.warn('Feed start error:', e);
+        }
+
+        // Load last used mode
+        try {
+            const res = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.last_agent_mode`);
+            if (res.ok) {
+                const data = await res.json();
+                this.selectedModeId = data.value || (this.agentModes[0]?.id);
+            }
+        } catch (e) {
+            this.selectedModeId = this.agentModes[0]?.id;
+        }
+
+        this.renderModeCards();
+
+        // Show staging, hide active
+        this.showAgentPanel();
+        document.getElementById('agentStaging').style.display = '';
+        document.getElementById('agentActive').style.display = 'none';
+        this.isStagingActive = true;
+
+        // Hide record button and swap title for staging
+        document.getElementById('appContainer')?.classList.add('staging-mode');
+        this.recordButton.classList.add('hidden');
+        const titleFull = document.querySelector('.title-full');
+        if (titleFull) {
+            this._originalTitleHTML = titleFull.innerHTML;
+            titleFull.innerHTML = 'Speak out your <span class="title-bold">stories</span><span class="title-dot">.</span> <span class="title-realtime">in real-time</span>';
+        }
+
+        // Insert back button inside header-left (sits below header-right, above title)
+        const headerLeft = document.querySelector('.header-left');
+        if (headerLeft && !document.getElementById('agentBackBtn')) {
+            const backBtn = document.createElement('button');
+            backBtn.id = 'agentBackBtn';
+            backBtn.className = 'agent-back-btn';
+            backBtn.innerHTML = '<i class="ph ph-arrow-left"></i> Back to recent transcriptions';
+            backBtn.addEventListener('click', () => this.hideAgentPanel());
+            headerLeft.insertBefore(backBtn, headerLeft.firstChild);
+        }
+
+        // Notify main process that realtime feed is active (blocks widget recording)
+        if (window.electronAPI && window.electronAPI.setRealtimeActive) {
+            window.electronAPI.setRealtimeActive(true);
+        }
+    }
+
+    async loadAgentModes() {
+        try {
+            const res = await fetch(`${this.backendUrl}/api/agent-modes`);
+            if (res.ok) {
+                const data = await res.json();
+                this.agentModes = data.modes || [];
+            }
+        } catch (e) {
+            this.agentModes = [];
+        }
+    }
+
+    renderModeCards() {
+        const container = document.getElementById('agentModeSelector');
+        if (!container) return;
+        container.innerHTML = '';
+
+        // Remove old custom prompt box if present
+        const oldBox = document.getElementById('customPromptBox');
+        if (oldBox) oldBox.remove();
+
+        for (const mode of this.agentModes) {
+            const card = document.createElement('div');
+            card.className = `agent-mode-card${mode.id === this.selectedModeId ? ' selected' : ''}`;
+            card.dataset.modeId = mode.id;
+            card.innerHTML = `
+                <div class="agent-mode-card-name">${mode.name}</div>
+                <div class="agent-mode-card-desc">${mode.description}</div>
+            `;
+            card.addEventListener('click', () => {
+                this.selectedModeId = mode.id;
+                container.querySelectorAll('.agent-mode-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+                this._toggleCustomPromptBox();
+            });
+            container.appendChild(card);
+        }
+
+        // Insert custom prompt box after the mode selector
+        const box = document.createElement('div');
+        box.id = 'customPromptBox';
+        box.className = 'custom-prompt-box hidden';
+        box.innerHTML = `
+            <textarea id="customPromptInput" class="custom-prompt-input" placeholder="Write your custom instructions for the AI agent..." rows="3"></textarea>
+        `;
+        container.parentNode.insertBefore(box, container.nextSibling);
+
+        // Load saved prompt into textarea
+        const customMode = this.agentModes.find(m => m.custom);
+        if (customMode) {
+            document.getElementById('customPromptInput').value = customMode.prompt || '';
+        }
+
+        // Auto-save on change
+        const textarea = document.getElementById('customPromptInput');
+        let saveTimeout;
+        textarea.addEventListener('input', () => {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => this._saveCustomPrompt(textarea.value), 600);
+        });
+
+        this._toggleCustomPromptBox();
+    }
+
+    _toggleCustomPromptBox() {
+        const box = document.getElementById('customPromptBox');
+        if (!box) return;
+        const isCustom = this.selectedModeId === 'custom';
+        box.classList.toggle('hidden', !isCustom);
+        if (isCustom) {
+            const ta = document.getElementById('customPromptInput');
+            if (ta) setTimeout(() => ta.focus(), 50);
+        }
+    }
+
+    async _saveCustomPrompt(text) {
+        // Persist to settings
+        try {
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.custom_agent_prompt`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: text })
+            });
+        } catch (e) {
+            console.warn('Failed to save custom prompt:', e);
+        }
+        // Also update in-memory mode prompt so beginStory uses latest text
+        const customMode = this.agentModes.find(m => m.custom);
+        if (customMode) customMode.prompt = text;
+    }
+
+    async beginStory() {
+        const mode = this.agentModes.find(m => m.id === this.selectedModeId) || this.agentModes[0];
+        this._selectedModeProactive = mode ? mode.proactive : true;
+
+        if (mode) {
+            // Write mode event to feed
+            await fetch(`${this.backendUrl}/api/feeds/mode`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: this._stagingSessionId,
+                    name: mode.name,
+                    prompt: mode.prompt,
+                    proactive: mode.proactive
+                })
+            });
+
+            // Save last used mode
+            await fetch(`${this.backendUrl}/api/config/settings/ui_settings.last_agent_mode`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: mode.id })
+            });
+        }
+
+        // Switch from staging to active
+        document.getElementById('agentStaging').style.display = 'none';
+        document.getElementById('agentActive').style.display = '';
+        document.getElementById('appContainer')?.classList.add('agent-mode');
+        this.isStagingActive = false;
+
+        // Now actually start recording
+        await this._startRecordingInternal();
+    }
+
+    // --- Agent Feed Panel (v2) ---
+
+    showAgentPanel() {
+        const panel = document.getElementById('agentFeedPanel');
+        if (panel) panel.classList.remove('hidden');
+        document.querySelector('.transcriptions-section')?.classList.add('hidden');
+    }
+
+    hideAgentPanel() {
+        const panel = document.getElementById('agentFeedPanel');
+        if (panel) {
+            panel.classList.add('hidden');
+            document.getElementById('appContainer')?.classList.remove('agent-mode');
+            document.querySelector('.transcriptions-section')?.classList.remove('hidden');
+            this.agentFeedOffset = 0;
+            this.agentConnected = false;
+            this.agentSessionPath = null;
+            const msgs = document.getElementById('agentMessages');
+            if (msgs) msgs.innerHTML = '';
+            const feed = document.getElementById('storyColFeed');
+            if (feed) feed.innerHTML = '';
+            const storyCol = document.getElementById('storyCol');
+            if (storyCol) storyCol.classList.remove('collapsed');
+            this._updateAgentStatus('idle');
+
+            // Reset staging state
+            this.isStagingActive = false;
+            this._lastHeartbeat = null;
+            this._stagingSessionId = null;
+            this._pendingAgentResponse = false;
+            this.isAgentMuted = false;
+            // Reset mute button UI
+            const muteBtn = document.getElementById('agentMuteBtn');
+            if (muteBtn) {
+                muteBtn.classList.remove('muted');
+                muteBtn.title = 'Mute agent';
+                muteBtn.querySelector('i').className = 'ph ph-speaker-high';
+            }
+            const staging = document.getElementById('agentStaging');
+            if (staging) staging.style.display = '';
+            const active = document.getElementById('agentActive');
+            if (active) active.style.display = 'none';
+
+            // Restore record button, original title, and remove back button
+            document.getElementById('appContainer')?.classList.remove('staging-mode');
+            document.getElementById('agentBackBtn')?.remove();
+            this.recordButton.classList.remove('hidden');
+            const titleFull = document.querySelector('.title-full');
+            if (titleFull && this._originalTitleHTML) {
+                titleFull.innerHTML = this._originalTitleHTML;
+            }
+
+            // Notify main process that realtime feed is no longer active
+            if (window.electronAPI && window.electronAPI.setRealtimeActive) {
+                window.electronAPI.setRealtimeActive(false);
+            }
+        }
+    }
+
+    async startAgentFeedPolling(sessionId) {
+        this.agentFeedOffset = 0;
+        this.agentConnected = false;
+        this.agentSessionPath = null;
+        this.showAgentPanel();
+        this._updateAgentStatus('broadcasting');
+        // Register session immediately so latest pointer is set now
+        try {
+            const res = await fetch(`${this.backendUrl}/api/feeds/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                this.agentSessionPath = data.path;
+            }
+        } catch (e) {
+            console.warn('Feed start error:', e);
+        }
+        this.agentFeedInterval = setInterval(() => this._pollAgentFeed(), 5000);
+    }
+
+    stopAgentFeedPolling() {
+        if (this.agentFeedInterval) {
+            clearInterval(this.agentFeedInterval);
+            this.agentFeedInterval = null;
+        }
+        // Panel stays visible after recording stops — hides on next startRecording()
+    }
+
+    async _pollAgentFeed() {
+        try {
+            const res = await fetch(`${this.backendUrl}/api/feeds/agent?offset=${this.agentFeedOffset}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.lines && data.lines.length > 0) {
+                for (const line of data.lines) {
+                    if (line.type === 'heartbeat') {
+                        this._lastHeartbeat = Date.now();
+                        continue;  // Don't render heartbeats
+                    }
+                    if (!this.agentConnected) {
+                        this.agentConnected = true;
+                    }
+                    this._pendingAgentResponse = false;
+                    this._renderAgentLine(line);
+                }
+                this.agentFeedOffset = data.offset;
+            }
+            this._updateHeartbeatStatus();
+        } catch (e) {
+            console.warn('Agent feed poll error:', e);
+        }
+    }
+
+    _updateHeartbeatStatus() {
+        // Handle 2x2 matrix: recording paused × agent muted
+        if (this.isRecordingPaused && this.isAgentMuted) {
+            this._updateAgentStatus('paused_muted');
+            return;
+        }
+        if (this.isRecordingPaused) {
+            this._updateAgentStatus('paused');
+            return;
+        }
+        if (this.isAgentMuted) {
+            this._updateAgentStatus('muted');
+            return;
+        }
+        // No heartbeats ever → waiting for agent
+        if (!this._lastHeartbeat) {
+            this._updateAgentStatus('awaiting');
+            return;
+        }
+        const age = Date.now() - this._lastHeartbeat;
+
+        // Heartbeat dead (>30s)
+        if (age > 30000) {
+            this._updateAgentStatus('disconnected');
+            return;
+        }
+        // Heartbeat stale (15-30s)
+        if (age > 15000) {
+            this._updateAgentStatus('stale');
+            return;
+        }
+        // Heartbeat fresh — agent is alive
+        if (this._pendingAgentResponse) {
+            this._updateAgentStatus('thinking');
+        } else if (!this._selectedModeProactive) {
+            this._updateAgentStatus('listening_quiet');
+        } else {
+            this._updateAgentStatus('listening');
+        }
+    }
+
+    _renderAgentLine(line) {
+        const container = document.getElementById('agentMessages');
+        if (!container) return;
+        const label = this._lastAgentPrompt
+            ? `Claude · ${this._lastAgentPrompt}`
+            : (line.label || line.type || 'Agent');
+        this._lastAgentPrompt = null;
+        const div = document.createElement('div');
+        div.className = 'agent-msg';
+        div.innerHTML = `
+            <div class="agent-msg-avatar"><i class="ph ph-robot"></i></div>
+            <div class="agent-msg-body">
+                <div class="agent-msg-label">${label}</div>
+                ${line.ctx ? `<div class="agent-msg-ctx">${this._renderMd(line.ctx)}</div>` : ''}
+                <div class="agent-msg-text">${this._renderMd(line.text)}</div>
+            </div>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    _renderMd(text) {
+        if (!text) return '';
+        return text
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+            .replace(/`(.+?)`/g, '<code>$1</code>')
+            .split('\n')
+            .map(line => {
+                if (line.match(/^- (.*)/)) return `<div class="md-bullet-line">— ${line.slice(2)}</div>`;
+                const numMatch = line.match(/^(\d+)\.\s(.*)/);
+                if (numMatch) return `<div class="md-num-line"><span class="md-num">${numMatch[1]}.</span> ${numMatch[2]}</div>`;
+                return line;
+            })
+            .join('<br>')
+            .replace(/<\/div><br><div class="md-(?:bullet|num)-line">/g, m => m.replace('<br>', ''))
+            .replace(/<br><div class="md-(?:bullet|num)-line">/g, m => m.replace('<br>', ''))
+            .replace(/<\/div>(<br>)+(?!<div class="md-)/g, '</div>');
+    }
+
+    _addStoryChunk(text, idx) {
+        const feed = document.getElementById('storyColFeed');
+        if (!feed) return;
+        feed.querySelectorAll('.story-chunk.live').forEach(el => el.classList.remove('live'));
+        const div = document.createElement('div');
+        div.className = 'story-chunk live';
+        const elapsed = this.timer ? this.timer.textContent : '00:00';
+        div.innerHTML = `<span class="story-chunk-time">${elapsed}</span><span class="story-chunk-text">${text}</span>`;
+        feed.appendChild(div);
+        feed.scrollTop = feed.scrollHeight;
+
+        // In proactive mode, a new chunk means we expect the agent to react (unless muted)
+        if (this._selectedModeProactive && this.agentConnected && !this.isAgentMuted) {
+            this._pendingAgentResponse = true;
+        }
+    }
+
+    async sendAgentPrompt(promptKey) {
+        const promptMap = {
+            summarize: 'Summarize the conversation so far',
+            challenge: 'Challenge this idea — what are the counterarguments?',
+            ambiguities: 'Identify ambiguities or unclear points in what was said',
+        };
+        const text = promptMap[promptKey] || promptKey;
+        const labelMap = {
+            summarize: 'Summarize',
+            challenge: 'Challenge',
+            ambiguities: 'Ambiguities',
+        };
+        this._lastAgentPrompt = labelMap[promptKey] || promptKey;
+        this._pendingAgentResponse = true;
+        const container = document.getElementById('agentMessages');
+        if (container) {
+            const div = document.createElement('div');
+            div.className = 'agent-user-prompt';
+            div.innerHTML = `<div class="agent-user-prompt-label">You</div><div class="agent-user-prompt-text">${text}</div>`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+        try {
+            await fetch(`${this.backendUrl}/api/feeds/prompt`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: promptKey, text })
+            });
+        } catch (e) {
+            console.warn('Prompt send error:', e);
+        }
+    }
+
+    _updateAgentStatus(phase) {
+        const dot = document.getElementById('agentStatusDot');
+        const txt = document.getElementById('agentStatusText');
+        if (!dot || !txt) return;
+        dot.className = 'agent-status-dot';
+        const labels = {
+            idle: '',
+            broadcasting: 'Broadcasting...',
+            awaiting: 'Waiting for agent...',
+            listening: 'Listening...',
+            listening_quiet: 'Listening quietly',
+            thinking: 'Thinking...',
+            paused: 'Recording paused',
+            muted: 'Agent muted',
+            paused_muted: 'Paused · Muted',
+            stale: 'Agent idle',
+            disconnected: 'Disconnected'
+        };
+        txt.textContent = labels[phase] || '';
+        if (phase === 'broadcasting' || phase === 'awaiting') dot.classList.add('broadcasting');
+        else if (phase === 'listening' || phase === 'listening_quiet' || phase === 'paused' || phase === 'paused_muted') dot.classList.add('connected');
+        else if (phase === 'muted') dot.classList.add('muted');
+        else if (phase === 'thinking') dot.classList.add('thinking');
+        else if (phase === 'stale') dot.classList.add('stale');
+        else if (phase === 'disconnected') dot.classList.add('disconnected');
     }
 }
 

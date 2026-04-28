@@ -8,6 +8,8 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const os = require('os');
 const robot = require('@jitsi/robotjs');
+app.commandLine.appendSwitch('remote-debugging-port', '9222');
+app.commandLine.appendSwitch('remote-allow-origins', '*');
 const { autoUpdater } = require('electron-updater');
 
 // ====================================
@@ -109,6 +111,9 @@ let screenCheckInterval = null;
 // Shortcuts tracking
 let currentRecordShortcut = 'CommandOrControl+Shift+R';
 
+// Realtime feed active flag (blocks widget recording when true)
+let realtimeFeedActive = false;
+
 // Database path (same as backend)
 const DATABASE_PATH = path.join(require('os').homedir(), 'Library/Application Support/Stories/transcriptions.db');
 
@@ -126,7 +131,7 @@ const RECORDING_CONFIG = {
   WARNING_MINUTES: 15,
   
   // Show "long recording" notice at this time (in minutes)
-  LONG_RECORDING_MINUTES: 5
+  LONG_RECORDING_MINUTES: 12
 };
 
 // For quick testing, uncomment these lines:
@@ -213,6 +218,8 @@ function createMainWindow() {
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
     console.error(`❌ Failed to load page: ${errorCode} - ${errorDescription}`);
   });
+
+  mainWindow.setContentProtection(false) // TODO: restore to true;
 
   // CRITICAL: Prevent window from closing - minimize to Dock instead
   // User can click on minimized window in Dock to restore
@@ -310,6 +317,8 @@ async function createWidgetWindow(shouldHide = false) {
     roundedCorners: true,
     hasShadow: true
   });
+
+  widgetWindow.setContentProtection(false) // TODO: restore to true;
 
   // Create a simple widget HTML file
   const widgetHtmlPath = path.join(__dirname, 'widget.html');
@@ -1126,7 +1135,54 @@ async function registerGlobalShortcuts() {
 
 async function toggleRecording() {
   console.log('🎤 Toggle recording:', isRecording ? 'STOP' : 'START');
-  
+
+  // INSTRUCTION MODE: If widget is recording a transform instruction, stop it via widget
+  if (widgetInstructionMode) {
+    console.log('🪄 Instruction mode active — sending stop to widget');
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('stop-instruction-recording');
+    }
+    return;
+  }
+
+  // DOUBLE-TAP: If recording AND pressed again within 500ms → switch to prompt mode
+  if (isRecording && recordingStartTimestamp && (Date.now() - recordingStartTimestamp) < DOUBLE_TAP_WINDOW_MS) {
+    console.log('🎯 Double-tap detected — switching to prompt mode');
+    recordingStartTimestamp = null;
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('switch-to-prompt-mode');
+    }
+    return; // Don't stop recording
+  }
+
+  // TRIPLE-TAP: If not recording AND a transcription just finished within 3s → open transform
+  if (!isRecording && lastTranscriptionTimestamp && (Date.now() - lastTranscriptionTimestamp) < 3000) {
+    console.log('🪄 Triple-tap detected — opening transform dropdown');
+    const savedId = lastTranscriptionId;
+    lastTranscriptionTimestamp = null;
+    lastTranscriptionId = null;
+    if (transformWindowTimer) {
+      clearTimeout(transformWindowTimer);
+      transformWindowTimer = null;
+    }
+    // Notify widget only — do NOT open transform panel in main window
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('open-transform-dropdown', savedId);
+    }
+    return;
+  }
+
+  // Block widget recording when realtime feed is active — user must use main window
+  if (!isRecording && realtimeFeedActive) {
+    console.warn('⚠️ Cannot start recording from widget: Realtime feed active — use main window');
+    new Notification({
+      title: 'Stories',
+      body: 'Use main window for Agent Mode',
+      silent: true
+    }).show();
+    return;
+  }
+
   // Check if API key is configured (only when starting recording)
   // Use cached value to avoid blocking HTTP call on every toggle
   if (!isRecording) {
@@ -1173,21 +1229,40 @@ async function toggleRecording() {
   // This ensures auto-paste goes to the most recent app, not the initial one
   let wasInStoriesApp = false; // Track if user was already in Stories
   
-  if ((process.platform === 'darwin' || process.platform === 'win32') && autoPasteEnabled) {
+  if (process.platform === 'darwin' && autoPasteEnabled) {
     // Capture active app (for auto-paste detection)
     // Skip entirely when auto-paste is disabled — saves 300-500ms
 
-    const detectedAppName = await detectCurrentApp();
-    if (detectedAppName) {
-      // Check if user was already in Stories app
-      if (detectedAppName === 'Electron' || detectedAppName === 'Stories' || detectedAppName === 'stories') {
-        wasInStoriesApp = true;
-      } else {
-        // User is in another app - save/update it for auto-paste
-        lastActiveApp = detectedAppName;
-      }
-    }
-
+    const { exec } = require('child_process');
+    const script = `
+      tell application "System Events"
+        try
+          set frontmostApp to name of first application process whose frontmost is true
+          return frontmostApp
+        on error
+          return "Unknown"
+        end try
+      end tell
+    `;
+    
+    // WAIT for the app capture to complete before continuing
+    await new Promise((resolve) => {
+      exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+        if (!error && stdout) {
+          const appName = stdout.trim();
+          
+          // Check if user was already in Stories app
+          if (appName === 'Electron' || appName === 'Stories' || appName === 'stories') {
+            wasInStoriesApp = true;
+          } else {
+            // User is in another app - save/update it for auto-paste
+            lastActiveApp = appName;
+          }
+        }
+        resolve(); // Always resolve to continue
+      });
+    });
+    
     // CRITICAL FIX: If we detected Stories when STOPPING, schedule async fallback detection
     // This catches the case where user navigated: App A → App B → App C → Stories
     // We want App C (last non-Stories app), not App A (initial app)
@@ -1198,13 +1273,33 @@ async function toggleRecording() {
       (async () => {
         const maxAttempts = 3;
         const delays = [400, 800, 1200]; // Progressive delays in ms
-
+        let detectedApp = null;
+        
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, delays[attempt]));
-
-          const retryAppName = await detectCurrentApp();
-          if (isValidApp(retryAppName)) {
-            lastActiveApp = retryAppName;
+          const currentDelay = delays[attempt];
+          await new Promise(resolve => setTimeout(resolve, currentDelay));
+          
+          // Try to detect the app
+          detectedApp = await new Promise((resolve) => {
+            exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
+              if (!error && stdout) {
+                const appName = stdout.trim();
+                
+                // Check if it's a valid app (not Stories/Electron/Unknown)
+                if (appName !== 'Electron' && appName !== 'Stories' && appName !== 'stories' && appName !== 'Unknown') {
+                  resolve(appName); // Valid app found
+                } else {
+                  resolve(null); // Invalid, keep trying
+                }
+              } else {
+                resolve(null); // Error, keep trying
+              }
+            });
+          });
+          
+          // If we found a valid app, stop trying
+          if (detectedApp) {
+            lastActiveApp = detectedApp;
             break;
           }
         }
@@ -1919,6 +2014,15 @@ let widgetHideTimeout = null;
 // Auto-paste setting
 let autoPasteEnabled = false;
 
+// Smart Transforms — triple-tap state
+let lastTranscriptionTimestamp = null;   // Date.now() when transcription completes
+let lastTranscriptionId = null;          // ID of last completed transcription
+let transformWindowTimer = null;         // 3-second timer for transform window
+let transformInProgress = false;         // Guard against concurrent transforms
+let widgetInstructionMode = false;       // Widget is recording a transform instruction
+let recordingStartTimestamp = null;      // When recording started (for double-tap detection)
+const DOUBLE_TAP_WINDOW_MS = 500;       // Max time between taps for prompt mode
+
 // Instant recording setting (skip animations & defer non-critical work)
 let instantRecordingEnabled = false;
 
@@ -1992,6 +2096,24 @@ ipcMain.handle('update-api-key-cache', async (event, hasKey) => {
 ipcMain.handle('request-widget-hide', async (event) => {
   try {
     if (autoHideWidgetEnabled && widgetWindow && !widgetWindow.isDestroyed()) {
+      // Smart Transforms: defer hide if transform window is active
+      if (lastTranscriptionTimestamp) {
+        const elapsed = Date.now() - lastTranscriptionTimestamp;
+        const remaining = Math.max(0, 3000 - elapsed);
+        console.log(`🪄 Transform window active — deferring widget hide by ${remaining}ms`);
+        if (transformWindowTimer) clearTimeout(transformWindowTimer);
+        transformWindowTimer = setTimeout(() => {
+          transformWindowTimer = null;
+          // Only hide if transform window has expired and no dropdown is open
+          if (!lastTranscriptionTimestamp && widgetWindow && !widgetWindow.isDestroyed() && autoHideWidgetEnabled) {
+            isWidgetActive = false;
+            widgetWindow.hide();
+            console.log('🪟 Widget hidden after transform window expired');
+          }
+        }, remaining);
+        return { success: true };
+      }
+
       // Clear any existing timeout (prevents race condition)
       if (widgetHideTimeout) {
         clearTimeout(widgetHideTimeout);
@@ -2218,56 +2340,20 @@ ipcMain.handle('open-audio-folder', async (event) => {
  * @returns {boolean} - True if app is valid for auto-paste
  */
 function isValidApp(app) {
-  if (!app || app === '' || app.startsWith('Error:')) return false;
-
-  // macOS invalid apps
-  if (app === 'Stories' || app === 'Electron' || app === 'stories' || app === 'Unknown') return false;
-
-  // Windows shell/system processes that aren't valid paste targets
-  const windowsSystemApps = ['explorer', 'SearchHost', 'ShellExperienceHost', 'TextInputHost'];
-  if (process.platform === 'win32' && windowsSystemApps.includes(app)) return false;
-
-  return true;
+  return app && 
+         app !== 'Stories' && 
+         app !== 'Electron' && 
+         app !== 'stories' &&
+         app !== 'Unknown' &&
+         app !== '' &&
+         !app.startsWith('Error:');
 }
 
 /**
- * Detect the current frontmost app on Windows using PowerShell + Win32 API
- * @returns {Promise<string|null>} - Window title or null if detection fails
- */
-async function detectCurrentAppWindows() {
-  const script = [
-    'Add-Type @"',
-    'using System;',
-    'using System.Runtime.InteropServices;',
-    'public class User32 {',
-    '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
-    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);',
-    '}',
-    '"@',
-    '$hwnd = [User32]::GetForegroundWindow()',
-    '$pid = 0',
-    '[User32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null',
-    '(Get-Process -Id $pid).MainWindowTitle',
-  ].join('\n');
-  try {
-    // Use -EncodedCommand to avoid shell quoting issues with C# code
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const { stdout } = await execPromise(`powershell -NoProfile -EncodedCommand ${encoded}`);
-    return stdout.trim() || null;
-  } catch (error) {
-    console.log('❌ Windows app detection failed:', error.message);
-    return null;
-  }
-}
-
-/**
- * Detect the current frontmost app using AppleScript (macOS) or PowerShell (Windows)
+ * Detect the current frontmost app using AppleScript
  * @returns {Promise<string|null>} - App name or null if detection fails
  */
 async function detectCurrentApp() {
-  if (process.platform === 'win32') {
-    return detectCurrentAppWindows();
-  }
   if (process.platform !== 'darwin') {
     return null;
   }
@@ -2298,22 +2384,6 @@ async function detectCurrentApp() {
       });
 }
 
-/**
- * Promisified child_process.exec for clean async/await usage
- */
-function execPromise(command) {
-  const { exec } = require('child_process');
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve({ stdout, stderr });
-      }
-    });
-  });
-}
-
 // ============================================================================
 // AUTO-PASTE HANDLER
 // ============================================================================
@@ -2322,7 +2392,7 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
   try {
     // Copy to clipboard first
     clipboard.writeText(text);
-
+    
     // Check if auto-paste is enabled
     if (!autoPasteEnabled) {
       console.log('📋 Auto-paste skipped (disabled by user)');
@@ -2333,24 +2403,7 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'Auto-paste disabled' };
     }
-
-    // ========================================================================
-    // FAIL FAST: Check Accessibility BEFORE doing anything else
-    // ========================================================================
-    if (process.platform === 'darwin') {
-      const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
-      if (!hasAccessibility) {
-        console.error('❌ Auto-paste blocked: Missing Accessibility permission');
-        console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
-        new Notification({
-          title: 'Stories - Accessibility Required',
-          body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
-          silent: false
-        }).show();
-        return { success: false, reason: 'Missing Accessibility permission' };
-      }
-    }
-
+    
     // ========================================================================
     // PRIORITY-BASED TARGET APP DETECTION
     // ========================================================================
@@ -2361,37 +2414,26 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
     // PRIORITY 3: Clipboard notification (no valid app found)
     //             → Fallback when user is in Stories or no app detected
     // ========================================================================
-
+    
     let targetApp = null;
-
+    
     // PRIORITY 1: Detect CURRENT app (in real-time)
     const currentApp = await detectCurrentApp();
-
+    
     if (isValidApp(currentApp)) {
       targetApp = currentApp;
     } else {
-      // PRIORITY 2: Use CAPTURED app (from toggleRecording or async fallback)
+      // PRIORITY 2: Use CAPTURED app (from toggleRecording)
+      // If lastActiveApp is Stories, wait for async fallback to complete
+      if (lastActiveApp === 'Stories' || lastActiveApp === 'Electron' || lastActiveApp === 'stories') {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+      
       if (isValidApp(lastActiveApp)) {
         targetApp = lastActiveApp;
-      } else {
-        // Retry detection with short delays — catches cases where the app
-        // behind the widget hasn't become frontmost yet
-        const retryDelays = [300, 600, 900];
-        for (const retryDelay of retryDelays) {
-          await new Promise(resolve => setTimeout(resolve, retryDelay));
-          const retryApp = await detectCurrentApp();
-          if (isValidApp(retryApp)) {
-            targetApp = retryApp;
-            break;
-          }
-          if (isValidApp(lastActiveApp)) {
-            targetApp = lastActiveApp;
-            break;
-          }
-        }
       }
     }
-
+    
     // PRIORITY 3: Clipboard notification (no valid target)
     if (!targetApp) {
       new Notification({
@@ -2401,117 +2443,207 @@ ipcMain.handle('request-auto-paste', async (event, text) => {
       }).show();
       return { success: false, reason: 'No target app detected' };
     }
-
-    // ========================================================================
-    // ACTIVATE TARGET APP + PASTE KEYSTROKE (platform-specific)
-    // ========================================================================
-
+    
+    // Execute auto-paste
     if (process.platform === 'darwin') {
-      // --- macOS: AppleScript activate + keystroke ---
-      const electronApps = [
-        'Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion',
-        'Figma', 'Obsidian', 'WhatsApp', 'Telegram', '1Password', 'Postman',
-        'Spotify', 'Teams', 'WebStorm', 'IntelliJ IDEA',
-      ];
+      const { exec } = require('child_process');
+      
+      // Determine delay based on app type
+      const electronApps = ['Cursor', 'Visual Studio Code', 'Code', 'Slack', 'Discord', 'Notion'];
       const isElectronApp = electronApps.some(app => targetApp.includes(app));
-      const delay = isElectronApp ? 1.2 : 0.5;
-
-      const safeAppName = targetApp.replace(/"/g, '\\"');
-
-      const pasteScript = `
-        tell application "${safeAppName}" to activate
-        delay ${delay}
-        tell application "System Events"
-          keystroke "v" using command down
-        end tell
-      `;
-
+      const activationDelay = isElectronApp ? 1000 : 500; // milliseconds
+      
       try {
-        await execPromise(`osascript -e '${pasteScript}'`);
-      } catch (pasteError) {
-        console.error('❌ Auto-paste AppleScript failed:', pasteError.message);
-        new Notification({
-          title: 'Stories',
-          body: 'Text copied to clipboard - press Cmd+V to paste',
-          silent: true
-        }).show();
-        return { success: false, reason: 'AppleScript failed', error: pasteError.message };
-      }
-
-      // Verification + retry: confirm focus wasn't stolen
-      const appAfterPaste = await detectCurrentApp();
-      if (appAfterPaste && appAfterPaste !== targetApp) {
-        try {
-          await execPromise(`osascript -e '${pasteScript}'`);
-        } catch (retryError) {
-          console.error('❌ Auto-paste retry failed:', retryError.message);
+        // Step 1: Activate target app using AppleScript
+        const activateScript = `tell application "${targetApp}" to activate`;
+        
+        exec(`osascript -e '${activateScript}'`, (activateError, activateStdout, activateStderr) => {
+          if (activateError) {
+            new Notification({
+              title: 'Stories',
+              body: 'Text copied to clipboard',
+              silent: true
+            }).show();
+            return;
+          }
+          
+          // Step 2: Wait for app to be ready, then paste
+          setTimeout(() => {
+            // CRITICAL: Verify Accessibility permissions BEFORE attempting paste
+            const hasAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
+            
+            if (!hasAccessibility) {
+              console.error('❌ Auto-paste blocked: Missing Accessibility permission');
+              console.error('   Solution: System Settings → Privacy & Security → Accessibility → Add Stories');
+              console.error('   If permission shown but not working: Close Stories, run "tccutil reset Accessibility com.pixelspace.stories", restart Mac');
+              
+              new Notification({
+                title: 'Stories - Accessibility Required',
+                body: 'Auto-paste needs Accessibility permission. Text copied - press Cmd+V to paste.',
+                silent: false
+              }).show();
+              
+              return;
+            }
+            
+            try {
+              // Verify robotjs is loaded
+              if (!robot || typeof robot.keyTap !== 'function') {
+                throw new Error('robotjs module not loaded correctly');
+              }
+              
+              // Execute auto-paste
+              robot.keyTap('v', 'command');
+              console.log('✅ Auto-paste SUCCESS →', targetApp, `(${text.length} chars)`);
+              
+            } catch (robotError) {
+              console.error('❌ Auto-paste failed:', robotError.message);
+              
           new Notification({
             title: 'Stories',
-            body: 'Text copied to clipboard - press Cmd+V to paste',
+                body: 'Text copied to clipboard - press Cmd+V to paste',
             silent: true
           }).show();
-          return { success: false, reason: 'Retry failed', error: retryError.message };
-        }
-      }
-    } else if (process.platform === 'win32') {
-      // --- Windows: PowerShell AppActivate + robotjs Ctrl+V ---
-      const safeAppName = targetApp.replace(/'/g, "''");
-
-      try {
-        await execPromise(`powershell -NoProfile -Command "(New-Object -ComObject WScript.Shell).AppActivate('${safeAppName}')"`);
-      } catch (activateError) {
-        console.error('❌ Windows app activation failed:', activateError.message);
-      }
-
-      // Short delay for the target window to gain focus
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      try {
-        robot.keyTap('v', 'control');
-      } catch (pasteError) {
-        console.error('❌ Windows paste keystroke failed:', pasteError.message);
+            }
+          }, activationDelay);
+        });
+        
+      } catch (error) {
+        console.error('❌ Auto-paste setup error:', error.message);
+        
         new Notification({
           title: 'Stories',
-          body: 'Text copied to clipboard - press Ctrl+V to paste',
+          body: 'Text copied to clipboard',
           silent: true
         }).show();
-        return { success: false, reason: 'Paste keystroke failed', error: pasteError.message };
       }
-
-      // Verification + retry: confirm focus wasn't stolen
-      const appAfterPaste = await detectCurrentApp();
-      if (appAfterPaste && appAfterPaste !== targetApp) {
-        try {
-          await execPromise(`powershell -NoProfile -Command "(New-Object -ComObject WScript.Shell).AppActivate('${safeAppName}')"`);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          robot.keyTap('v', 'control');
-        } catch (retryError) {
-          console.error('❌ Windows auto-paste retry failed:', retryError.message);
-          new Notification({
-            title: 'Stories',
-            body: 'Text copied to clipboard - press Ctrl+V to paste',
-            silent: true
-          }).show();
-          return { success: false, reason: 'Retry failed', error: retryError.message };
-        }
-      }
+      
     } else {
       console.log('⚠️ Auto-paste not supported on this platform');
       new Notification({
         title: 'Stories',
-        body: 'Text copied to clipboard',
+        body: 'Text copied - press Cmd+V to paste',
         silent: true
       }).show();
-      return { success: false, reason: 'Platform not supported' };
     }
-
-    console.log(`✅ Auto-paste SUCCESS → "${targetApp}" (${text.length} chars)`);
-    return { success: true, targetApp };
+    
+    return { success: true };
   } catch (error) {
     console.error('❌ Auto-paste error:', error.message);
     console.error('   Stack trace:', error.stack);
+    console.log('================================================================================');
     return { success: false, error: error.message };
   }
+});
+
+// ============================================================================
+// SMART TRANSFORMS — IPC HANDLERS
+// ============================================================================
+
+ipcMain.handle('request-transform-apply', async (event, data) => {
+  if (transformInProgress) {
+    return { success: false, error: 'Transform already in progress' };
+  }
+  transformInProgress = true;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/transform/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      // Copy to clipboard
+      clipboard.writeText(result.transformed_text);
+
+      // Show macOS notification
+      new Notification({
+        title: 'Stories',
+        body: 'Transform applied — copied to clipboard',
+        silent: true
+      }).show();
+
+      // Clear transform window state
+      lastTranscriptionTimestamp = null;
+      lastTranscriptionId = null;
+
+      // Notify main window to refresh
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'transcription_completed');
+      }
+    }
+
+    transformInProgress = false;
+    return result;
+  } catch (error) {
+    transformInProgress = false;
+    console.error('❌ Transform apply error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('request-prompt-apply', async (event, data) => {
+  try {
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/transform/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if (response.ok && result.success) {
+      clipboard.writeText(result.text);
+      new Notification({
+        title: 'Stories',
+        body: 'AI response copied to clipboard',
+        silent: true
+      }).show();
+
+      // Clear transform window state (so auto-hide works)
+      lastTranscriptionTimestamp = null;
+      lastTranscriptionId = null;
+
+      // Notify main window to refresh history
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('sync-recording-state-broadcast', 'transcription_completed');
+      }
+    }
+
+    return result;
+  } catch (error) {
+    console.error('❌ Prompt apply error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('transform-dropdown-closed', async () => {
+  // User dismissed transform dropdown without selecting — restart 3-second timer
+  if (!autoPasteEnabled) {
+    lastTranscriptionTimestamp = Date.now();
+    console.log('🪄 Transform dropdown closed — restarting 3s window');
+  }
+  return { success: true };
+});
+
+ipcMain.handle('clear-transform-window', async () => {
+  lastTranscriptionTimestamp = null;
+  lastTranscriptionId = null;
+  if (transformWindowTimer) {
+    clearTimeout(transformWindowTimer);
+    transformWindowTimer = null;
+  }
+  console.log('🪄 Transform window cleared (widget went inactive)');
+  return { success: true };
+});
+
+ipcMain.handle('widget-instruction-mode', async (event, active) => {
+  widgetInstructionMode = active;
+  console.log(`🪄 Widget instruction mode: ${active}`);
+  return { success: true };
 });
 
 // IPC handlers for dual-window architecture
@@ -2654,24 +2786,40 @@ ipcMain.handle('get-window-states', () => {
   };
 });
 
-// Handle widget resize with animation (expand from center upwards)
-ipcMain.handle('resize-widget', (event, width, height) => {
+// Handle widget resize with animation
+// direction: 'down' = keep top-left, grow right+down. Default = center horizontally, expand upward.
+ipcMain.handle('resize-widget', (event, width, height, direction) => {
   if (widgetWindow && !widgetWindow.isDestroyed()) {
     const currentBounds = widgetWindow.getBounds();
-    const widthDiff = width - currentBounds.width;
-    const heightDiff = height - currentBounds.height;
-    
-    // Calculate new position to expand from center upwards
-    const newX = currentBounds.x - (widthDiff / 2);  // Center horizontally
-    const newY = currentBounds.y - heightDiff;        // Expand upwards
-    
-    widgetWindow.setBounds({
-      x: Math.round(newX),
-      y: Math.round(newY),
-      width: width,
-      height: height
-    }, true);  // true = animate the transition
+
+    if (direction === 'down') {
+      // Stay in place, just change size (grow right + down)
+      widgetWindow.setBounds({
+        x: currentBounds.x,
+        y: currentBounds.y,
+        width: width,
+        height: height
+      }, true);
+      // Prevent widget from stealing focus during transform resize
+      widgetWindow.blur();
+    } else {
+      // Center horizontally, expand upward
+      const widthDiff = width - currentBounds.width;
+      const heightDiff = height - currentBounds.height;
+      widgetWindow.setBounds({
+        x: Math.round(currentBounds.x - (widthDiff / 2)),
+        y: Math.round(currentBounds.y - heightDiff),
+        width: width,
+        height: height
+      }, true);
+    }
   }
+});
+
+ipcMain.handle('set-realtime-active', (event, isActive) => {
+  realtimeFeedActive = isActive;
+  console.log(`📡 Realtime feed active: ${isActive}`);
+  return true;
 });
 
 ipcMain.handle('sync-recording-state', (event, message) => {
@@ -2680,15 +2828,18 @@ ipcMain.handle('sync-recording-state', (event, message) => {
   // Update recording state flag and tray state
   if (message === 'widget_recording_started' || message === 'main_recording_started') {
     isRecording = true;
+    recordingStartTimestamp = Date.now(); // For double-tap detection
     console.log('🎬 Recording state updated: isRecording = true');
     // Update tray to recording state (red background)
     updateTrayState('recording');
   } else if (message === 'widget_recording_stopped' || message === 'main_recording_stopped') {
     isRecording = false;
+    recordingStartTimestamp = null;
     console.log('⏹️ Recording state updated: isRecording = false');
     // Don't update tray yet - wait for transcription to start
   } else if (message === 'widget_recording_cancelled') {
     isRecording = false;
+    recordingStartTimestamp = null;
     console.log('🚫 Recording cancelled - reverting tray to idle');
     updateTrayState('idle');
     // CRITICAL: Don't show or focus main window when cancelling
@@ -2701,6 +2852,12 @@ ipcMain.handle('sync-recording-state', (event, message) => {
     console.log('⏹️ Recording state updated: isRecording = false');
     // Update tray to ready state (green dot, will auto-revert to idle after 2 seconds)
     updateTrayState('ready');
+
+    // Smart Transforms: start 3-second transform window (only if auto-paste is OFF)
+    if (!autoPasteEnabled) {
+      lastTranscriptionTimestamp = Date.now();
+      console.log('🪄 Transform window opened (3s)');
+    }
   } else if (message === 'widget_transcription_error' || message === 'main_transcription_error' || message === 'transcription_failed') {
     isRecording = false;
     // Update tray back to idle on error

@@ -8,10 +8,11 @@ import os
 import sys
 import time
 
-VERSION = "0.9.9"
+VERSION = "0.9.8"
 import tempfile
 import sqlite3
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, after_this_request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -61,6 +62,9 @@ load_dotenv()
 
 # Import retry logic
 from retry_logic import transcribe_with_retry, create_retry_notification, get_user_friendly_error, get_audio_duration
+
+# Import Gemini transcription
+from gemini_transcription import transcribe_with_gemini, GEMINI_MODELS
 
 # Import audio storage
 from audio_storage import get_default_storage_manager, save_temp_audio_with_metadata, save_temp_audio_with_metadata_safe
@@ -293,20 +297,35 @@ def init_database():
         cursor.execute("ALTER TABLE transcriptions ADD COLUMN error_message TEXT")
         print("✅ Status migration completed")
     
+    # Migration: Add transform columns if they don't exist
+    for col, col_type in [
+        ('original_text', 'TEXT'),
+        ('transformed_text', 'TEXT'),
+        ('transform_label', 'TEXT'),
+        ('source_type', "TEXT DEFAULT 'standard'"),
+        ('stt_model', 'TEXT'),
+    ]:
+        try:
+            cursor.execute(f"SELECT {col} FROM transcriptions LIMIT 1")
+        except sqlite3.OperationalError:
+            print(f"🔄 Migrating database: Adding {col} column...")
+            cursor.execute(f"ALTER TABLE transcriptions ADD COLUMN {col} {col_type}")
+            print(f"✅ {col} migration completed")
+
     # Create indexes for performance optimization
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_created_at 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_created_at
         ON transcriptions(created_at DESC)
     ''')
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_id 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_audio_id
         ON transcriptions(audio_id)
     ''')
     cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_transcriptions_status 
+        CREATE INDEX IF NOT EXISTS idx_transcriptions_status
         ON transcriptions(status)
     ''')
-    
+
     conn.commit()
     conn.close()
     print(f"✅ Database initialized at: {DATABASE_PATH}")
@@ -349,6 +368,131 @@ def get_openai_client():
 
 # Check if API key is available at startup (but don't initialize client yet)
 OPENAI_API_KEY = get_api_key()
+
+
+# ============================================================================
+# STT MODEL ROUTING
+# ============================================================================
+
+def get_stt_model() -> str:
+    """Read selected STT model from config. Defaults to 'whisper'."""
+    try:
+        return get_default_config_manager().get_setting('ui_settings.stt_model', 'whisper') or 'whisper'
+    except Exception:
+        return 'whisper'
+
+
+STT_MODEL_LABELS = {
+    'whisper': 'Whisper',
+    'gemini-flash': 'Gemini Flash',
+    'gemini-flash-lite': 'Gemini Flash Lite',
+}
+
+# Failures where the OTHER engine is worth trying. Auth errors are excluded
+# because the other engine has its own credentials — switching wouldn't help.
+FALLBACK_RETRY_REASONS = {
+    'server_error',
+    'rate_limit',
+    'network_error',
+    'api_timeout',
+    'unknown_error',
+}
+
+
+def _run_engine(stt_model: str, audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
+    """Invoke a single STT engine. Returns RetryResult."""
+    if stt_model in GEMINI_MODELS:
+        gemini_key = get_default_config_manager().get_gemini_api_key()
+        return transcribe_with_gemini(
+            audio_file_path=audio_file_path,
+            api_key=gemini_key,
+            model=GEMINI_MODELS[stt_model],
+            prompt=prompt,
+            audio_duration=audio_duration,
+        )
+    return transcribe_with_retry(
+        audio_file_path=audio_file_path,
+        openai_client=get_openai_client(),
+        max_attempts=max_attempts,
+        prompt=prompt,
+        audio_duration=audio_duration,
+    )
+
+
+def _engine_credentials_ok(stt_model: str) -> bool:
+    """Quick credential check for a specific engine."""
+    cm = get_default_config_manager()
+    if stt_model in GEMINI_MODELS:
+        return bool(cm.get_gemini_api_key())
+    return bool(get_api_key())
+
+
+def _pick_fallback_engine(primary: str) -> str | None:
+    """Pick the other engine to try if primary fails. None if no viable fallback."""
+    if primary in GEMINI_MODELS:
+        # Gemini failed → fall back to Whisper if OpenAI is configured
+        return 'whisper' if _engine_credentials_ok('whisper') else None
+    # Whisper failed → fall back to Gemini Flash Lite if Gemini key is configured
+    return 'gemini-flash-lite' if _engine_credentials_ok('gemini-flash-lite') else None
+
+
+def run_transcription(audio_file_path, prompt=None, audio_duration=None, max_attempts=3):
+    """
+    Dispatch transcription to the engine selected in settings.
+
+    If the primary engine fails with a transient/server error AND the other
+    engine has credentials configured, transparently retry with that engine.
+    Auth errors do NOT trigger fallback (the other engine has its own key).
+
+    Returns a RetryResult so callers can keep their existing flow.
+    The result.data dict is annotated with `stt_model` (friendly label).
+    When fallback fired, the label includes "(fallback from <primary>)".
+    """
+    primary = get_stt_model()
+    primary_label = STT_MODEL_LABELS.get(primary, primary)
+
+    result = _run_engine(primary, audio_file_path, prompt, audio_duration, max_attempts)
+
+    if not result.success:
+        reason = result.retry_reason.value if result.retry_reason else 'unknown_error'
+        if reason in FALLBACK_RETRY_REASONS:
+            fallback = _pick_fallback_engine(primary)
+            if fallback:
+                fallback_label = STT_MODEL_LABELS.get(fallback, fallback)
+                logger.warning(
+                    f"⤺ STT fallback: {primary_label} failed ({reason}), "
+                    f"retrying with {fallback_label}"
+                )
+                fallback_result = _run_engine(fallback, audio_file_path, prompt, audio_duration, max_attempts)
+                if fallback_result.success and isinstance(fallback_result.data, dict):
+                    fallback_result.data['stt_model'] = (
+                        f"{fallback_label} (fallback from {primary_label})"
+                    )
+                    logger.info(f"✅ STT fallback succeeded with {fallback_label}")
+                    return fallback_result
+                # Fallback also failed — return the fallback's failure
+                logger.error(f"❌ STT fallback to {fallback_label} also failed")
+                return fallback_result
+            else:
+                logger.info(f"ℹ️ STT fallback skipped: no other engine configured")
+
+    if result.success and isinstance(result.data, dict):
+        result.data['stt_model'] = primary_label
+
+    return result
+
+
+def stt_credentials_ok() -> tuple[bool, str]:
+    """Check whether the credentials for the active STT engine exist."""
+    stt_model = get_stt_model()
+    if stt_model in GEMINI_MODELS:
+        key = get_default_config_manager().get_gemini_api_key()
+        if not key:
+            return False, "Gemini API key not configured. Add it in Settings."
+        return True, ""
+    if not get_api_key():
+        return False, "OpenAI API key not configured. Add it in Settings."
+    return True, ""
 API_AVAILABLE = bool(OPENAI_API_KEY)
 if not API_AVAILABLE:
     print("💡 Configure API key in .env file or use the configuration API")
@@ -384,29 +528,20 @@ def transcribe_audio():
     logger.info(f"🔗 Has Active Session: {has_active_session}")
     
     try:
-        # CRITICAL: Always update API_AVAILABLE dynamically from config
-        # Don't trust the global variable set at startup
-        api_key = get_api_key()
-        
-        # Update API_AVAILABLE based on CURRENT API key status
+        # CRITICAL: Always re-check credentials dynamically from config for the active STT engine
         global API_AVAILABLE
-        API_AVAILABLE = bool(api_key)
-        
-        logger.info(f"🔑 API Check: {'✅ Available' if API_AVAILABLE else '❌ Not Available'}")
-        
-        if api_key:
-            masked_key = f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 11 else "***"
-            logger.info(f"   API Key: {masked_key}")
-        else:
-            logger.error(f"   ❌ API Key NOT SET - Please configure it in Settings")
-        
-        if not API_AVAILABLE:
-            # Only complete recording if there was an active session
+        creds_ok, creds_error = stt_credentials_ok()
+        API_AVAILABLE = creds_ok
+        active_model = get_stt_model()
+
+        logger.info(f"🔑 STT Engine: {active_model} — {'✅ Ready' if creds_ok else '❌ Missing key'}")
+
+        if not creds_ok:
             if has_active_session:
-                window_manager.complete_recording(False, {"error": "API not available"})
+                window_manager.complete_recording(False, {"error": creds_error})
             return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
+                "error": creds_error,
+                "details": creds_error
             }), 503
         
         # Check if audio file is present
@@ -534,20 +669,16 @@ def transcribe_audio():
             else:
                 logger.info(f"⏭️ Step 5/6: Completed in {step_elapsed:.2f}s (no dictionary words)")
             
-            # Step 6/6: Transcribe using OpenAI Whisper API
-            logger.info(f"📍 Step 6/6: OpenAI transcription (max attempts: 3)")
+            # Step 6/6: Transcribe using selected STT engine
+            logger.info(f"📍 Step 6/6: Transcription via '{active_model}' (max attempts: 3)")
             step_start = time.time()
-            
+
             try:
-                openai_client = get_openai_client()
-                print(f"   OpenAI client: {type(openai_client).__name__ if openai_client else 'None'}")
-                
-                retry_result = transcribe_with_retry(
+                retry_result = run_transcription(
                     audio_file_path=temp_file_path,
-                    openai_client=openai_client,
-                    max_attempts=3,
                     prompt=whisper_prompt,
-                    audio_duration=audio_duration
+                    audio_duration=audio_duration,
+                    max_attempts=3,
                 )
                 
                 step_elapsed = time.time() - step_start
@@ -588,11 +719,16 @@ def transcribe_audio():
                     print(f"Warning: Failed to apply dictionary corrections: {dict_error}")
                     # Continue with original text if dictionary fails
                 
-                try:
-                    transcription_id = save_transcription(transcription_data, audio_id)
-                    print(f"📝 Transcription saved with ID: {transcription_id}")
-                except Exception as db_error:
-                    print(f"Warning: Failed to save transcription to database: {db_error}")
+                # Skip saving if ephemeral (e.g., instruction mode for custom transforms)
+                ephemeral = request.form.get('ephemeral', 'false').lower() == 'true'
+                if not ephemeral:
+                    try:
+                        transcription_id = save_transcription(transcription_data, audio_id)
+                        print(f"📝 Transcription saved with ID: {transcription_id}")
+                    except Exception as db_error:
+                        print(f"Warning: Failed to save transcription to database: {db_error}")
+                else:
+                    print(f"📝 Ephemeral transcription — not saved to DB")
                 
                 # Update audio metadata with successful transcription (only if audio was saved)
                 if audio_id:
@@ -825,47 +961,51 @@ def transcribe_audio():
 
 
 # Database helper functions
-def save_transcription(data, audio_id=None, status='success', error_message=None):
+def save_transcription(data, audio_id=None, status='success', error_message=None, source_type='standard'):
     """Save transcription to database and return the ID
-    
+
     Args:
         data: Dictionary with transcription data (text, language, duration)
         audio_id: ID of the saved audio file
         status: 'success' or 'error'
         error_message: Error message if status is 'error'
+        source_type: Origin type — 'standard', 'fluid', or 'realtime'
     """
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    
+
     # Use local timestamp instead of SQLite's CURRENT_TIMESTAMP
     local_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    
+
     cursor.execute('''
-        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message))
-    
+        INSERT INTO transcriptions (text, created_at, language, duration, audio_id, status, error_message, source_type, stt_model)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (data['text'], local_timestamp, data.get('language'), data.get('duration'), audio_id, status, error_message, source_type, data.get('stt_model')))
+
     transcription_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    
-    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} (status: {status}, audio_id: {audio_id})")
+
+    print(f"✅ Transcription saved with ID: {transcription_id} at {local_timestamp} "
+          f"(status: {status}, audio_id: {audio_id}, source: {source_type}, "
+          f"stt_model: {data.get('stt_model') or 'unknown'})")
     return transcription_id
 
 def get_transcriptions():
     """Get all transcriptions ordered by newest first"""
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    
+
     cursor.execute('''
-        SELECT id, text, created_at, language, duration, audio_id, status, error_message
+        SELECT id, text, created_at, language, duration, audio_id, status, error_message,
+               original_text, transformed_text, transform_label, source_type, stt_model
         FROM transcriptions
         ORDER BY created_at DESC
     ''')
-    
+
     rows = cursor.fetchall()
     conn.close()
-    
+
     transcriptions = []
     for row in rows:
         transcriptions.append({
@@ -875,10 +1015,15 @@ def get_transcriptions():
             'language': row[3],
             'duration': row[4],
             'audio_id': row[5],
-            'status': row[6] if len(row) > 6 else 'success',  # Default to success for old records
-            'error_message': row[7] if len(row) > 7 else None
+            'status': row[6] if len(row) > 6 else 'success',
+            'error_message': row[7] if len(row) > 7 else None,
+            'original_text': row[8] if len(row) > 8 else None,
+            'transformed_text': row[9] if len(row) > 9 else None,
+            'transform_label': row[10] if len(row) > 10 else None,
+            'source_type': row[11] if len(row) > 11 else 'standard',
+            'stt_model': row[12] if len(row) > 12 else None,
         })
-    
+
     return transcriptions
 
 def delete_transcription(transcription_id):
@@ -921,16 +1066,17 @@ def get_transcription_by_audio_id(audio_id):
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT id, text, created_at, language, duration, audio_id, status, error_message
+        SELECT id, text, created_at, language, duration, audio_id, status, error_message,
+               original_text, transformed_text, transform_label, source_type, stt_model
         FROM transcriptions
         WHERE audio_id = ?
         ORDER BY created_at DESC
         LIMIT 1
     ''', (audio_id,))
-    
+
     row = cursor.fetchone()
     conn.close()
-    
+
     if row:
         return {
             'id': row[0],
@@ -940,7 +1086,12 @@ def get_transcription_by_audio_id(audio_id):
             'duration': row[4],
             'audio_id': row[5],
             'status': row[6] if len(row) > 6 else 'success',
-            'error_message': row[7] if len(row) > 7 else None
+            'error_message': row[7] if len(row) > 7 else None,
+            'original_text': row[8] if len(row) > 8 else None,
+            'transformed_text': row[9] if len(row) > 9 else None,
+            'transform_label': row[10] if len(row) > 10 else None,
+            'source_type': row[11] if len(row) > 11 else 'standard',
+            'stt_model': row[12] if len(row) > 12 else None,
         }
     return None
 
@@ -960,10 +1111,10 @@ def update_transcription(transcription_id, data, status='success', error_message
     cursor = conn.cursor()
     
     cursor.execute('''
-        UPDATE transcriptions 
-        SET text = ?, language = ?, duration = ?, status = ?, error_message = ?
+        UPDATE transcriptions
+        SET text = ?, language = ?, duration = ?, status = ?, error_message = ?, stt_model = ?
         WHERE id = ?
-    ''', (data['text'], data.get('language'), data.get('duration'), status, error_message, transcription_id))
+    ''', (data['text'], data.get('language'), data.get('duration'), status, error_message, data.get('stt_model'), transcription_id))
     
     affected_rows = cursor.rowcount
     conn.commit()
@@ -1029,44 +1180,41 @@ def retry_transcription():
     Returns: JSON with transcribed text or error details
     """
     try:
-        # Check if API is available
-        if not API_AVAILABLE:
-            return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
-            }), 503
-        
+        # Check credentials for the active STT engine
+        creds_ok, creds_error = stt_credentials_ok()
+        if not creds_ok:
+            return jsonify({"error": creds_error, "details": creds_error}), 503
+
         # Check if audio file is present
         if 'audio' not in request.files:
             return jsonify({"error": "No audio file provided"}), 400
-        
+
         audio_file = request.files['audio']
         if audio_file.filename == '':
             return jsonify({"error": "No file selected"}), 400
-        
+
         # Get max attempts from form data (default to 5 for manual retry)
         max_attempts = int(request.form.get('max_attempts', 5))
         max_attempts = min(max_attempts, 10)  # Cap at 10 attempts
-        
+
         # Save uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_file:
             audio_file.save(temp_file.name)
             temp_file_path = temp_file.name
-        
+
         try:
             # Get audio duration for dynamic timeout calculation
             audio_duration = get_audio_duration(temp_file_path)
-            
+
             # Generate prompt from dictionary
             whisper_prompt = generate_whisper_prompt_from_dictionary()
-            
-            # Retry transcription with more attempts for manual retry
-            retry_result = transcribe_with_retry(
+
+            # Retry transcription using the active STT engine
+            retry_result = run_transcription(
                 audio_file_path=temp_file_path,
-                openai_client=get_openai_client(),
-                max_attempts=max_attempts,
                 prompt=whisper_prompt,
-                audio_duration=audio_duration
+                audio_duration=audio_duration,
+                max_attempts=max_attempts,
             )
             
             # Clean up temporary file
@@ -1151,13 +1299,11 @@ def retry_audio_transcription(audio_id):
         JSON with updated transcription or error details
     """
     try:
-        # Check if API is available
-        if not API_AVAILABLE:
-            return jsonify({
-                "error": "OpenAI API not available",
-                "details": "Please configure OPENAI_API_KEY in .env file"
-            }), 503
-        
+        # Check credentials for the active STT engine
+        creds_ok, creds_error = stt_credentials_ok()
+        if not creds_ok:
+            return jsonify({"error": creds_error, "details": creds_error}), 503
+
         # Get audio metadata
         storage = get_default_storage_manager()
         audio_info = storage.get_audio_info(audio_id)
@@ -1199,13 +1345,12 @@ def retry_audio_transcription(audio_id):
         # Generate prompt from dictionary
         whisper_prompt = generate_whisper_prompt_from_dictionary()
         
-        # Retry transcription
-        retry_result = transcribe_with_retry(
+        # Retry transcription using the active STT engine
+        retry_result = run_transcription(
             audio_file_path=audio_path,
-            openai_client=get_openai_client(),
-            max_attempts=max_attempts,
             prompt=whisper_prompt,
-            audio_duration=audio_duration
+            audio_duration=audio_duration,
+            max_attempts=max_attempts,
         )
         
         if retry_result.success:
@@ -1968,6 +2113,52 @@ def validate_api_key():
             "details": str(e)
         }), 500
 
+# ----- Gemini API key endpoints -----
+
+@app.route('/api/config/gemini-key', methods=['GET'])
+def get_gemini_key_status():
+    """Return whether a Gemini API key is configured (masked)."""
+    try:
+        cm = get_default_config_manager()
+        key = cm.get_gemini_api_key()
+        if key:
+            masked = f"AIza·······{key[-4:]}" if len(key) > 10 else "AIza····****"
+            return jsonify({"has_api_key": True, "api_key_masked": masked})
+        return jsonify({"has_api_key": False, "api_key_masked": None})
+    except Exception as e:
+        return jsonify({"error": "Failed to read Gemini key status", "details": str(e)}), 500
+
+
+@app.route('/api/config/gemini-key', methods=['POST'])
+def set_gemini_key():
+    """Set the Gemini API key."""
+    try:
+        data = request.get_json() or {}
+        if 'api_key' not in data:
+            return jsonify({"error": "API key not provided"}), 400
+        api_key = data['api_key'].strip()
+        result = get_default_config_manager().set_gemini_api_key(api_key)
+        if result.get('valid') and result.get('saved'):
+            return jsonify({"success": True, "message": "Gemini API key saved", "validation": result})
+        return jsonify({"success": False, "validation": result}), 400
+    except Exception as e:
+        return jsonify({"error": "Failed to save Gemini key", "details": str(e)}), 500
+
+
+@app.route('/api/config/gemini-key', methods=['DELETE'])
+def delete_gemini_key():
+    """Remove the Gemini API key."""
+    try:
+        cm = get_default_config_manager()
+        if not cm.get_gemini_api_key():
+            return jsonify({"error": "No API key configured"}), 404
+        if cm.delete_gemini_api_key():
+            return jsonify({"success": True, "message": "Gemini API key removed"})
+        return jsonify({"error": "Failed to remove Gemini key"}), 500
+    except Exception as e:
+        return jsonify({"error": "Failed to remove Gemini key", "details": str(e)}), 500
+
+
 @app.route('/api/config/settings/<setting_key>', methods=['GET'])
 def get_setting(setting_key):
     """Get a specific setting"""
@@ -2345,13 +2536,565 @@ def update_permission_status():
         }), 500
 
 
+# ============================================================================
+# REAL-TIME FEED ENDPOINTS
+# ============================================================================
+
+from fluid_transcription import FEEDS_DIR
+from pathlib import Path as _Path
+
+
+@app.route('/api/agent-modes', methods=['GET'])
+def get_agent_modes():
+    """Read all .md files from agent-modes/ dir, parse frontmatter + body."""
+    # In dev: __file__ is backend/app.py → parent.parent is repo root
+    # In packaged app: stories-backend is at Contents/Resources/ → modes are at Contents/Resources/app/agent-modes/
+    modes_dir = _Path(__file__).parent.parent / 'agent-modes'
+    if not modes_dir.exists():
+        modes_dir = _Path(__file__).parent / 'app' / 'agent-modes'
+    modes = []
+    # Desired display order (unlisted files sorted alphabetically at end)
+    _order = ['senior-designer', 'tech-lead', 'bizdev-advisor', 'custom']
+    if modes_dir.exists():
+        for f in sorted(modes_dir.glob('*.md')):
+            text = f.read_text(encoding='utf-8')
+            parts = text.split('---', 2)
+            if len(parts) >= 3:
+                meta = {}
+                for line in parts[1].strip().split('\n'):
+                    if ':' in line:
+                        k, v = line.split(':', 1)
+                        k, v = k.strip(), v.strip()
+                        if v.lower() == 'true': v = True
+                        elif v.lower() == 'false': v = False
+                        meta[k] = v
+                mode_entry = {
+                    'id': f.stem,
+                    'name': meta.get('name', f.stem),
+                    'description': meta.get('description', ''),
+                    'proactive': meta.get('proactive', False),
+                    'prompt': parts[2].strip(),
+                    'custom': meta.get('custom', False),
+                }
+                # For custom mode, load saved user prompt if available
+                if mode_entry['custom']:
+                    cm = get_default_config_manager()
+                    saved = cm.get_setting('ui_settings.custom_agent_prompt')
+                    if saved:
+                        mode_entry['prompt'] = saved
+                modes.append(mode_entry)
+    # Sort by explicit order, then alphabetically
+    def _sort_key(m):
+        try:
+            return _order.index(m['id'])
+        except ValueError:
+            return len(_order)
+    modes.sort(key=_sort_key)
+    return jsonify({'modes': modes})
+
+
+@app.route('/api/feeds/mode', methods=['POST'])
+def post_feed_mode():
+    """Write mode event as first line of stories-feed.jsonl."""
+    data = request.get_json()
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    feed_dir = FEEDS_DIR / session_id
+    feed_dir.mkdir(parents=True, exist_ok=True)
+    stories_feed = feed_dir / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'mode',
+        't': datetime.now(timezone.utc).isoformat(),
+        'name': data.get('name', ''),
+        'prompt': data.get('prompt', ''),
+        'proactive': data.get('proactive', False)
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/path', methods=['GET'])
+def get_feeds_path():
+    """Return the base feeds directory path."""
+    return jsonify({"path": str(FEEDS_DIR)})
+
+
+@app.route('/api/feeds/latest', methods=['GET'])
+def get_feeds_latest():
+    """Return the latest active feed session path."""
+    latest_file = FEEDS_DIR / 'latest'
+    if latest_file.exists():
+        session_id = latest_file.read_text().strip()
+        feed_dir = FEEDS_DIR / session_id
+        return jsonify({
+            "session_id": session_id,
+            "path": str(feed_dir),
+            "stories_feed": str(feed_dir / 'stories-feed.jsonl'),
+            "agent_feed": str(feed_dir / 'agent-feed.jsonl'),
+            "exists": feed_dir.exists()
+        })
+    return jsonify({"session_id": None, "path": None}), 404
+
+
+@app.route('/api/feeds/start', methods=['POST'])
+def start_feed_session():
+    """Register a new feed session immediately when recording starts."""
+    data = request.get_json()
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    feed_dir = FEEDS_DIR / session_id
+    feed_dir.mkdir(parents=True, exist_ok=True)
+    # Write latest pointer immediately
+    (FEEDS_DIR / 'latest').write_text(session_id)
+    logger.info(f"📡 Feed session started: {session_id}")
+    return jsonify({'ok': True, 'path': str(feed_dir), 'session_id': session_id})
+
+
+@app.route('/api/feeds/agent', methods=['GET'])
+def get_agent_feed():
+    offset = int(request.args.get('offset', 0))
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'lines': [], 'offset': offset, 'session_id': None})
+    session_id = latest_file.read_text().strip()
+    agent_feed = FEEDS_DIR / session_id / 'agent-feed.jsonl'
+    if not agent_feed.exists():
+        return jsonify({'lines': [], 'offset': offset, 'session_id': session_id})
+    with open(agent_feed, 'r', encoding='utf-8') as f:
+        all_lines = f.readlines()
+    new_lines = all_lines[offset:]
+    parsed = []
+    for line in new_lines:
+        line = line.strip()
+        if line:
+            try:
+                parsed.append(json.loads(line))
+            except Exception:
+                pass
+    return jsonify({'lines': parsed, 'offset': offset + len(new_lines), 'session_id': session_id})
+
+
+@app.route('/api/feeds/prompt', methods=['POST'])
+def post_feed_prompt():
+    data = request.get_json()
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'user_prompt',
+        't': datetime.now(timezone.utc).isoformat(),
+        'prompt': data.get('prompt', ''),
+        'text': data.get('text', '')
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/pause', methods=['POST'])
+def post_feed_pause():
+    """Write pause event to stories-feed.jsonl."""
+    data = request.get_json()
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'pause',
+        't': datetime.now(timezone.utc).isoformat(),
+        'elapsed': data.get('elapsed', 0)
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/resume', methods=['POST'])
+def post_feed_resume():
+    """Write resume event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'resume',
+        't': datetime.now(timezone.utc).isoformat()
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/agent-mute', methods=['POST'])
+def post_feed_agent_mute():
+    """Write agent_muted event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'agent_muted',
+        't': datetime.now(timezone.utc).isoformat()
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/feeds/agent-unmute', methods=['POST'])
+def post_feed_agent_unmute():
+    """Write agent_unmuted event to stories-feed.jsonl."""
+    latest_file = FEEDS_DIR / 'latest'
+    if not latest_file.exists():
+        return jsonify({'error': 'No active session'}), 404
+    session_id = latest_file.read_text().strip()
+    stories_feed = FEEDS_DIR / session_id / 'stories-feed.jsonl'
+    line = json.dumps({
+        'event': 'agent_unmuted',
+        't': datetime.now(timezone.utc).isoformat()
+    })
+    with open(stories_feed, 'a', encoding='utf-8') as f:
+        f.write(line + '\n')
+    return jsonify({'ok': True})
+
+
+# ============================================================================
+# SMART TRANSFORMS
+# ============================================================================
+
+TRANSFORM_MODEL = "gpt-5.4-nano"
+
+TRANSFORM_PRESETS = [
+    {
+        "id": "translate_es",
+        "label": "Translate to Spanish",
+        "prompt": "Translate the following text to Spanish. Preserve the original meaning, tone, and formatting. Return only the translated text, nothing else."
+    },
+    {
+        "id": "translate_en",
+        "label": "Translate to English",
+        "prompt": "Translate the following text to English. Preserve the original meaning, tone, and formatting. Return only the translated text, nothing else."
+    },
+    {
+        "id": "format_nicely",
+        "label": "Format Nicely",
+        "prompt": "Format the following text with proper paragraphs, punctuation, capitalization, and spacing. Fix grammar issues but do not change the content or meaning. Return only the formatted text."
+    },
+    {
+        "id": "bullet_points",
+        "label": "Bullet Points",
+        "prompt": "Convert the following text into clear, concise bullet points. Group related ideas together. Return only the bullet points, nothing else."
+    },
+    {
+        "id": "structure",
+        "label": "Structure",
+        "prompt": "Restructure the following text for maximum readability. Add section headers where appropriate, organize ideas logically, and break up long blocks of text. Preserve all original content. Return only the structured text."
+    },
+    {
+        "id": "summarize",
+        "label": "Summarize",
+        "prompt": "Provide a concise summary of the following text. Capture all key points and important details. Return only the summary, nothing else."
+    },
+    {
+        "id": "make_concise",
+        "label": "Make Concise",
+        "prompt": "Rewrite the following text to be shorter and more concise while preserving all key information and meaning. Remove filler words, redundancy, and unnecessary detail. Return only the concise version."
+    },
+]
+
+PLAIN_TEXT_RULE = (
+    " Output format: plain text only by default — do NOT use Markdown syntax "
+    "(no **bold**, no _italic_, no `code`, no #headings, no bullet markers like '-' or '*', no tables, no links). "
+    "Use Markdown or any visual styling ONLY if the user's instruction explicitly opts in by asking for "
+    "Markdown, formatting, headings, bullets, bold, italics, code blocks, tables, or any other visual structure. "
+    "If the request is just to translate, summarize, rewrite, fix, condense, or otherwise transform text "
+    "without explicitly asking for visual structure, return raw plain text with normal punctuation only."
+)
+
+TRANSFORM_SYSTEM_PROMPT = (
+    "You are a precise text transformation assistant. Apply the requested transformation exactly as instructed. "
+    "Return only the transformed result — no preamble, no explanation, no commentary."
+    + PLAIN_TEXT_RULE
+)
+
+PROMPT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Respond directly and concisely to the user's request."
+    + PLAIN_TEXT_RULE
+)
+
+def _get_dictionary_context():
+    """Get dictionary words as context string for AI prompts."""
+    try:
+        dictionary = get_default_dictionary_manager()
+        if not dictionary.is_enabled():
+            return ""
+        words = dictionary.get_all_words()
+        if not words:
+            return ""
+        word_list = [w['word'] for w in words[:50]]
+        return f"\n\nWhen these proper nouns or terms appear, spell them exactly as: {', '.join(word_list)}"
+    except Exception:
+        return ""
+
+
+@app.route('/api/transform/presets', methods=['GET'])
+def get_transform_presets():
+    """Return available transform presets for frontend/widget rendering."""
+    # Return presets without the full prompt (frontend only needs id + label)
+    presets = [{"id": p["id"], "label": p["label"]} for p in TRANSFORM_PRESETS]
+    # Add the custom option
+    presets.append({"id": "custom", "label": "Custom..."})
+    return jsonify({"presets": presets})
+
+
+@app.route('/api/transform/apply', methods=['POST'])
+def apply_transform():
+    """Apply a text transformation to a transcription using OpenAI Chat Completions.
+
+    Request body:
+        transcription_id: int — ID of the transcription to transform
+        preset_id: str | null — preset ID (e.g. 'translate_es') or null for custom
+        custom_prompt: str | null — custom instruction (only when preset_id is null or 'custom')
+        source: 'original' | 'current' — which text to transform (default 'current')
+    """
+    data = request.get_json()
+    if not data or 'transcription_id' not in data:
+        return jsonify({'error': 'transcription_id is required'}), 400
+
+    transcription_id = data['transcription_id']
+    preset_id = data.get('preset_id')
+    custom_prompt = data.get('custom_prompt')
+    source = data.get('source', 'current')
+
+    # Fetch transcription from DB
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, text, original_text, transformed_text, transform_label, source_type
+        FROM transcriptions WHERE id = ?
+    ''', (transcription_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Transcription not found'}), 404
+
+    current_text = row[1]
+    original_text = row[2]
+    source_type = row[5] or 'standard'
+
+    # Only realtime transcriptions are excluded from transforms
+    if source_type == 'realtime':
+        conn.close()
+        return jsonify({'error': 'Cannot transform real-time transcriptions'}), 400
+
+    # Determine source text
+    if source == 'original' and original_text:
+        source_text = original_text
+    else:
+        source_text = current_text
+
+    # Determine transform prompt
+    if preset_id and preset_id != 'custom':
+        preset = next((p for p in TRANSFORM_PRESETS if p['id'] == preset_id), None)
+        if not preset:
+            conn.close()
+            return jsonify({'error': f'Unknown preset: {preset_id}'}), 400
+        transform_prompt = preset['prompt']
+        label = preset['label']
+    elif custom_prompt:
+        transform_prompt = custom_prompt
+        label = f"Custom: {custom_prompt[:100]}"
+    else:
+        conn.close()
+        return jsonify({'error': 'Either preset_id or custom_prompt is required'}), 400
+
+    # Call OpenAI
+    client = get_openai_client()
+    if not client:
+        conn.close()
+        return jsonify({'error': 'OpenAI API not available. Please check your API key in Settings.'}), 503
+
+    import time as _time
+    max_retries = 3
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=TRANSFORM_MODEL,
+                messages=[
+                    {"role": "system", "content": TRANSFORM_SYSTEM_PROMPT + _get_dictionary_context()},
+                    {"role": "user", "content": f"{transform_prompt}\n\n---\n\n{source_text}"}
+                ]
+            )
+            result_text = response.choices[0].message.content.strip()
+            last_error = None
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning(f"⚠️ Transform attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt < max_retries - 1:
+                _time.sleep(1 * (attempt + 1))  # 1s, 2s backoff
+
+    if last_error:
+        conn.close()
+        logger.error(f"❌ Transform API error after {max_retries} attempts: {last_error}")
+        error_str = str(last_error).lower()
+        if "model" in error_str and ("not found" in error_str or "not have access" in error_str):
+            user_msg = f"Model '{TRANSFORM_MODEL}' is not available on your OpenAI account. Check your API key permissions or try a different model."
+        elif "insufficient_quota" in error_str or "exceeded" in error_str:
+            user_msg = "Your OpenAI account has no credits remaining. Add credits at platform.openai.com."
+        elif "invalid_api_key" in error_str or "incorrect api key" in error_str:
+            user_msg = "Invalid API key. Check your API key in Settings."
+        elif "rate_limit" in error_str or "too many requests" in error_str:
+            user_msg = "Too many requests. Wait a moment and try again."
+        elif "timeout" in error_str or "connection" in error_str or "network" in error_str:
+            user_msg = "Network error. Check your internet connection and try again."
+        else:
+            user_msg = f"Transform failed: {str(last_error)[:200]}"
+        return jsonify({'error': user_msg}), 500
+
+    # Update DB: preserve original on first transform, then update text
+    if not original_text:
+        # First transform — snapshot original
+        cursor.execute('''
+            UPDATE transcriptions
+            SET original_text = text, text = ?, transformed_text = ?, transform_label = ?
+            WHERE id = ?
+        ''', (result_text, result_text, label, transcription_id))
+    else:
+        # Re-transform — original already preserved
+        cursor.execute('''
+            UPDATE transcriptions
+            SET text = ?, transformed_text = ?, transform_label = ?
+            WHERE id = ?
+        ''', (result_text, result_text, label, transcription_id))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"✅ Transform applied: id={transcription_id}, label={label}")
+    return jsonify({
+        'success': True,
+        'transformed_text': result_text,
+        'label': label
+    })
+
+
+@app.route('/api/transform/prompt', methods=['POST'])
+def prompt_direct():
+    """Direct AI prompt — no prior transcription needed. User speaks a question/command."""
+    data = request.get_json()
+    prompt_text = data.get('prompt', '').strip()
+
+    if not prompt_text:
+        return jsonify({'success': False, 'error': 'No prompt provided'}), 400
+
+    client = get_openai_client()
+    if not client:
+        return jsonify({'success': False, 'error': 'API key not configured'}), 500
+
+    # Call AI with the prompt directly
+    max_retries = 3
+    result_text = None
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model=TRANSFORM_MODEL,
+                messages=[
+                    {"role": "system", "content": PROMPT_SYSTEM_PROMPT + _get_dictionary_context()},
+                    {"role": "user", "content": prompt_text}
+                ],
+                temperature=0.7
+            )
+            result_text = response.choices[0].message.content.strip()
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                import time as _time
+                _time.sleep(1 * (attempt + 1))
+            else:
+                logger.error(f"❌ Prompt failed after {max_retries} attempts: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+    # Save as a story: original_text = prompt, text = response
+    label = f"Custom: {prompt_text}"
+    transcription_data = {
+        'text': result_text,
+        'language': 'en',
+        'duration': 0,
+        'model': TRANSFORM_MODEL
+    }
+    try:
+        transcription_id = save_transcription(transcription_data, source_type='standard')
+        conn = sqlite3.connect(DATABASE_PATH)
+        conn.execute(
+            'UPDATE transcriptions SET original_text = ?, transform_label = ?, transformed_text = ? WHERE id = ?',
+            (prompt_text, label, result_text, transcription_id)
+        )
+        conn.commit()
+        conn.close()
+        logger.info(f"📝 Prompt story saved with ID: {transcription_id}")
+    except Exception as db_error:
+        logger.warning(f"Failed to save prompt story: {db_error}")
+
+    return jsonify({
+        'success': True,
+        'text': result_text,
+        'prompt': prompt_text,
+        'label': label
+    })
+
+
+@app.route('/api/transform/revert/<int:transcription_id>', methods=['POST'])
+def revert_transform(transcription_id):
+    """Revert a transcription to its original text."""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT id, original_text FROM transcriptions WHERE id = ?
+    ''', (transcription_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Transcription not found'}), 404
+
+    if not row[1]:
+        conn.close()
+        return jsonify({'error': 'No transform to revert — transcription is already original'}), 400
+
+    cursor.execute('''
+        UPDATE transcriptions
+        SET text = original_text, original_text = NULL, transformed_text = NULL, transform_label = NULL
+        WHERE id = ?
+    ''', (transcription_id,))
+
+    conn.commit()
+    conn.close()
+
+    logger.info(f"✅ Transform reverted: id={transcription_id}")
+    return jsonify({'success': True, 'text': row[1]})
+
+
 # Register fluid transcription routes
 register_fluid_routes(
     app,
     get_openai_client=get_openai_client,
     generate_whisper_prompt=generate_whisper_prompt_from_dictionary,
     save_transcription_fn=save_transcription,
-    DATABASE_PATH=DATABASE_PATH
+    DATABASE_PATH=DATABASE_PATH,
+    transcribe_chunk_fn=run_transcription,
+    stt_credentials_check=stt_credentials_ok,
 )
 
 if __name__ == '__main__':
@@ -2364,6 +3107,15 @@ if __name__ == '__main__':
     sys.stdout.flush()
     print("📍 Server will be available at: http://127.0.0.1:5002")
     print("🔧 API Status:", "Available" if API_AVAILABLE else "Not Available (missing API key)")
+    # STT setup snapshot — useful when diagnosing config-related transcription failures
+    try:
+        _active_stt = get_stt_model()
+        _active_label = STT_MODEL_LABELS.get(_active_stt, _active_stt)
+        _has_openai = 'yes' if get_api_key() else 'no'
+        _has_gemini = 'yes' if get_default_config_manager().get_gemini_api_key() else 'no'
+        print(f"🎙️  STT setup: active={_active_label} | openai_key={_has_openai} | gemini_key={_has_gemini}")
+    except Exception as _e:
+        print(f"⚠️  Could not log STT setup: {_e}")
     print(f"💾 Database: {DATABASE_PATH}")
     print("📍 Endpoints available:")
     print("   - GET  /api/health")
@@ -2407,6 +3159,8 @@ if __name__ == '__main__':
     print("   - POST /api/transcribe/chunk")
     print("   - POST /api/transcribe/fluid-complete")
     print("   - POST /api/transcribe/save-audio")
+    print("   - GET  /api/feeds/path")
+    print("   - GET  /api/feeds/latest")
     print("=" * 50)
     
     # Port fallback configuration

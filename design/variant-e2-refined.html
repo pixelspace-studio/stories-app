@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=700, initial-scale=1.0">
+    <title>Variant E2: Split View Refined</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
+    <style>
+        :root {
+            --color-pink: #FF005E;
+            --color-pink-light: #DEB0C1;
+            --gray-90: #1A1A1A;
+            --gray-80: #333333;
+            --gray-70: #4A4A4A;
+            --gray-60: #666666;
+            --gray-50: #808080;
+            --gray-45: #999999;
+            --gray-40: #A6A6A6;
+            --gray-35: #B3B3B3;
+            --gray-30: #CCCCCC;
+            --gray-25: #D0D0D0;
+            --gray-20: #F2F2F2;
+            --warm-gray-20: #FAF8F8;
+            --color-white: #FFFFFF;
+            --color-background: #FFFFFF;
+            --color-border-light: rgba(0,0,0,0.08);
+            --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+            --space-5: 20px; --space-6: 24px; --space-8: 32px;
+            --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px;
+            --radius-xl: 16px; --radius-full: 9999px;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+            --text-xs: 10px; --text-sm: 12px; --text-base: 14px;
+            --text-lg: 16px;
+            --transition-fast: 0.2s ease;
+            --transition-smooth: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+            background: var(--color-background);
+            color: var(--gray-90);
+            width: 700px; height: 480px;
+            overflow: hidden;
+        }
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* === Header === */
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-3) var(--space-5);
+            border-bottom: 1px solid var(--color-border-light);
+            height: 50px;
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex; align-items: center; gap: var(--space-3);
+        }
+
+        .record-btn {
+            width: 30px; height: 30px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+
+        .stop-sq {
+            width: 9px; height: 9px;
+            background: var(--color-white);
+            border-radius: 2px;
+        }
+
+        .timer {
+            font-size: var(--text-base);
+            font-weight: 600;
+            font-family: 'SF Mono', monospace;
+        }
+
+        .wave-row { display: flex; gap: 2px; align-items: center; }
+        .wave-row .w {
+            width: 3px; height: 6px;
+            background: var(--gray-30); border-radius: 2px;
+            animation: wv 1.5s ease-in-out infinite;
+        }
+        .wave-row .w:nth-child(2) { animation-delay: 0.2s; }
+        .wave-row .w:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes wv { 0%,100% { height: 5px; } 50% { height: 14px; } }
+
+        .header-right { display: flex; align-items: center; gap: var(--space-2); }
+
+        .icon-btn {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            background: var(--gray-20);
+            border: none; border-radius: var(--radius-md);
+            color: var(--gray-60); cursor: pointer; font-size: var(--text-lg);
+        }
+
+        /* === Split body === */
+        .split-body {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* === LEFT: Agent Column (primary) === */
+        .agent-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--color-border-light);
+        }
+
+        /* agent col always takes remaining space */
+
+        .col-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5);
+            border-bottom: 1px solid var(--color-border-light);
+            flex-shrink: 0;
+            height: 36px;
+        }
+
+        .col-title {
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--gray-60);
+        }
+
+        .status-dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--gray-30);
+            margin-left: auto;
+            transition: background var(--transition-fast);
+        }
+
+        .status-dot.broadcasting {
+            background: var(--color-pink);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .status-dot.connected { background: #34C759; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+        .status-text {
+            font-size: 10px;
+            color: var(--gray-40);
+        }
+
+        /* Agent feed */
+        .agent-feed {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-4) var(--space-5);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-5);
+        }
+
+        .agent-feed::-webkit-scrollbar { width: 3px; }
+        .agent-feed::-webkit-scrollbar-thumb { background: var(--gray-20); border-radius: 2px; }
+
+        .agent-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-3);
+            height: 100%;
+        }
+
+        .agent-empty i { font-size: 24px; color: var(--gray-25); }
+
+        .agent-empty p {
+            font-size: 10px;  /* -2pt from text-xs 12px... actually text-sm is 12, let's say this is base 12px → 10px */
+            color: var(--gray-30);
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        /* Agent message */
+        .agent-msg {
+            display: flex;
+            gap: var(--space-3);
+            animation: up 0.35s cubic-bezier(0.4,0,0.2,1);
+        }
+
+        @keyframes up {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .avatar {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            background: var(--color-pink);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 2px;
+        }
+
+        .avatar i { font-size: 11px; color: var(--color-white); }
+
+        .msg-body { flex: 1; min-width: 0; }
+
+        .msg-label {
+            font-size: 10px;  /* was text-xs 10px, stays */
+            color: var(--gray-35);
+            margin-bottom: var(--space-1);
+        }
+
+        /* Quote from transcript */
+        .msg-ctx {
+            font-size: 10px;  /* stays at 10px */
+            color: var(--gray-40);
+            padding: 3px var(--space-3);
+            border-left: 2px solid var(--gray-20);
+            margin-bottom: var(--space-2);
+            line-height: 1.4;
+        }
+
+        /* Agent message text: was text-sm (12px) → -2pt → 10px */
+        .msg-text {
+            font-size: 10px;
+            color: var(--gray-70);
+            line-height: 1.7;
+        }
+
+        /* User bubble */
+        .user-bubble {
+            align-self: flex-end;
+            background: var(--warm-gray-20);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-lg) var(--radius-lg) 3px var(--radius-lg);
+            padding: var(--space-2) var(--space-3);
+            animation: up 0.3s ease;
+        }
+
+        .user-bubble-label {
+            font-size: 10px;
+            color: var(--color-pink);
+            margin-bottom: 2px;
+        }
+
+        .user-bubble-text {
+            font-size: 10px;
+            color: var(--gray-60);
+            line-height: 1.4;
+        }
+
+        /* Typing */
+        .typing {
+            display: flex; align-items: center; gap: var(--space-2);
+            animation: up 0.2s ease;
+        }
+
+        .dots { display: flex; gap: 3px; align-items: center; }
+
+        .dots span {
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: var(--gray-25);
+            animation: blink 1.4s infinite;
+        }
+        .dots span:nth-child(2) { animation-delay: 0.2s; }
+        .dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
+
+        /* === Prompt area (chips row + expanding input) === */
+        .prompt-area {
+            flex-shrink: 0;
+            border-top: 1px solid var(--color-border-light);
+            padding: var(--space-2) var(--space-4) var(--space-3);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-2);
+        }
+
+        /* Chips row — hides when input is focused */
+        .chips-row {
+            display: flex;
+            gap: var(--space-2);
+            overflow: hidden;
+            max-height: 28px;
+            opacity: 1;
+            transition: max-height 0.2s ease, opacity 0.15s ease;
+        }
+
+        .chips-row.hidden-row {
+            max-height: 0;
+            opacity: 0;
+        }
+
+        .p-chip {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: 3px var(--space-2);
+            background: var(--color-background);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-full);
+            font-size: 10px;
+            color: var(--gray-50);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all var(--transition-fast);
+        }
+
+        .p-chip:hover { border-color: var(--color-pink); color: var(--color-pink); }
+        .p-chip.firing { background: var(--color-pink); color: var(--color-white); border-color: var(--color-pink); }
+
+        /* Input row */
+        .input-row {
+            display: flex;
+            gap: var(--space-2);
+            align-items: flex-end;
+        }
+
+        .p-input {
+            flex: 1;
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--color-border-light);
+            border-radius: var(--radius-lg);
+            font-size: 10px;
+            color: var(--gray-90);
+            background: var(--color-background);
+            outline: none;
+            resize: none;
+            line-height: 1.5;
+            min-height: 30px;
+            max-height: 80px;
+            height: 30px;
+            overflow-y: hidden;
+            transition: height 0.2s ease, border-color var(--transition-fast), box-shadow var(--transition-fast);
+            font-family: inherit;
+        }
+
+        .p-input::placeholder { color: var(--gray-30); }
+
+        .p-input:focus {
+            border-color: var(--color-pink);
+            height: 60px;
+            overflow-y: auto;
+        }
+
+        .p-send {
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            background: var(--gray-90);
+            border: none;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background var(--transition-fast);
+            margin-bottom: 2px;
+        }
+
+        .p-send:hover { background: var(--color-pink); }
+        .p-send i { font-size: 11px; color: var(--color-white); }
+
+        /* === RIGHT: Your Story Column (collapsible) === */
+        .story-col {
+            /* fixed width, transitions to narrow strip when collapsed */
+            flex: 0 0 139px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--warm-gray-20);
+            border-left: 1px solid var(--color-border-light);
+            transition: flex-basis var(--transition-smooth);
+        }
+
+        .story-col.collapsed {
+            flex-basis: 28px;
+        }
+
+        .story-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: 0 var(--space-2) 0 var(--space-3);
+            border-bottom: 1px solid var(--color-border-light);
+            flex-shrink: 0;
+            height: 36px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .story-header:hover { background: rgba(0,0,0,0.025); }
+
+        .story-title {
+            font-size: 9px;
+            font-weight: 500;
+            color: var(--gray-35);
+            white-space: nowrap;
+            flex: 1;
+            overflow: hidden;
+            /* disappears as column shrinks — no special state needed,
+               it just clips naturally with overflow:hidden on parent */
+        }
+
+        /* chevron: → expanded (click to hide), ← collapsed (click to show) */
+        .story-chevron {
+            font-size: 13px;
+            color: var(--gray-25);
+            flex-shrink: 0;
+            transition: transform var(--transition-smooth);
+            line-height: 1;
+        }
+
+        .story-col.collapsed .story-chevron {
+            transform: rotate(180deg);
+        }
+
+        /* Story feed */
+        .story-feed {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--space-3) var(--space-3);
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-3);
+            opacity: 1;
+            transition: opacity 0.15s ease;
+        }
+
+        .story-col.collapsed .story-feed {
+            opacity: 0;
+            pointer-events: none;
+            overflow: hidden;
+        }
+
+        .story-feed::-webkit-scrollbar { width: 3px; }
+        .story-feed::-webkit-scrollbar-thumb { background: var(--gray-20); border-radius: 2px; }
+
+        /* Story chunks: was text-xs=10px → -2pt → 8px */
+        .t-chunk {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            animation: up 0.3s ease;
+        }
+
+        .t-chunk-time {
+            font-size: 8px;
+            color: var(--gray-30);
+            font-family: 'SF Mono', monospace;
+        }
+
+        .t-chunk-text {
+            font-size: 8px;
+            color: var(--gray-45);
+            line-height: 1.55;
+        }
+
+        .t-chunk.live .t-chunk-text { color: var(--gray-70); }
+        .t-chunk.live .t-chunk-time { color: var(--color-pink); }
+
+        .t-empty {
+            font-size: 9px;
+            color: var(--gray-30);
+            text-align: center;
+            padding-top: var(--space-8);
+            font-style: italic;
+        }
+
+        /* Reset */
+        .reset-btn {
+            position: fixed;
+            bottom: var(--space-4); right: var(--space-4);
+            padding: var(--space-2) var(--space-4);
+            background: var(--gray-90); color: var(--color-white);
+            border: none; border-radius: var(--radius-md);
+            font-size: var(--text-sm); cursor: pointer;
+            z-index: 100; opacity: 0.5;
+            transition: opacity var(--transition-fast);
+        }
+        .reset-btn:hover { opacity: 1; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <header class="app-header">
+        <!-- Recording state -->
+        <div class="header-left" id="recHeader">
+            <button class="record-btn" id="stopBtn"><div class="stop-sq"></div></button>
+            <span class="timer" id="timer">00:00</span>
+            <span style="font-size:11px; color:var(--gray-45)">recording</span>
+            <div class="wave-row"><div class="w"></div><div class="w"></div><div class="w"></div></div>
+        </div>
+        <!-- Ended state -->
+        <div class="header-left hidden" id="endedHeader">
+            <button class="record-btn" style="background:var(--gray-20)"><i class="ph ph-microphone" style="font-size:14px;color:var(--gray-60)"></i></button>
+            <span class="timer" id="timerFinal" style="color:var(--gray-40)">00:00</span>
+            <span style="font-size:11px; color:var(--gray-35)">session ended</span>
+        </div>
+        <div class="header-right">
+            <!-- Download button (visible after session ends) -->
+            <div id="downloadRow" class="hidden" style="display:flex;align-items:center;gap:8px">
+                <button class="icon-btn" id="downloadBtn" title="Download timeline" style="background:var(--color-pink);color:white">
+                    <i class="ph ph-download-simple"></i>
+                </button>
+                <span style="font-size:10px;color:var(--gray-35)">Export</span>
+            </div>
+            <button class="icon-btn"><i class="ph ph-notebook"></i></button>
+            <button class="icon-btn"><i class="ph ph-gear"></i></button>
+        </div>
+    </header>
+
+    <div class="split-body">
+        <!-- Agent Column -->
+        <div class="agent-col" id="agentCol">
+            <div class="col-header">
+                <span class="col-title">Agent</span>
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">Connecting</span>
+            </div>
+
+            <div class="agent-feed" id="agentFeed">
+                <div class="agent-empty" id="emptyState">
+                    <i class="ph ph-robot"></i>
+                    <p>Waiting for agent.<br>Broadcasting your words now.</p>
+                </div>
+            </div>
+
+            <div class="prompt-area">
+                <div class="chips-row" id="chipsRow">
+                    <button class="p-chip" data-p="summarize"><i class="ph ph-text-align-left"></i> Summarize</button>
+                    <button class="p-chip" data-p="challenge"><i class="ph ph-shield-warning"></i> Challenge</button>
+                    <button class="p-chip" data-p="ambiguities"><i class="ph ph-question"></i> Ambiguities</button>
+                    <button class="p-chip" data-p="diagram"><i class="ph ph-graph"></i> Diagram</button>
+                </div>
+                <div class="input-row">
+                    <textarea class="p-input" id="pInput" placeholder="Ask the agent anything..."></textarea>
+                    <button class="p-send" id="pSend"><i class="ph ph-arrow-up"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Your Story Column (collapsible) -->
+        <div class="story-col" id="storyCol">
+            <div class="story-header" id="storyToggle">
+                <span class="story-title">Your Story</span>
+                <i class="ph ph-caret-right story-chevron"></i>
+            </div>
+            <div class="story-feed" id="storyFeed">
+                <div class="t-empty" id="tEmpty">Transcription will appear as you speak.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<button class="reset-btn" id="resetBtn">Reset</button>
+
+<script>
+const S = { timer: 0, ti: null, mi: null, tmi: null, msgIdx: 0, tIdx: 0, recording: true, ended: false };
+let timeline = []; // shared transcript + agent events for download
+
+const agentMsgs = [
+    {
+        ctx: '"...scalability implications before committing..."',
+        text: 'Scalability concern is valid. With event-driven microservices, bottleneck shifts to message broker throughput — specifically at fan-out points. Scope Kafka vs NATS early; long-tail architectural consequences.',
+        label: 'Re: segment 1'
+    },
+    {
+        ctx: '"...microservices pattern with event-driven communication..."',
+        text: 'Correct direction. Hidden cost: distributed tracing becomes non-negotiable. Debugging a failed saga across 6 services without OpenTelemetry is a production nightmare. Budget this from day one.',
+        label: 'Re: segment 2'
+    },
+    {
+        ctx: null,
+        text: 'Three patterns surfacing: Event Sourcing, CQRS, Saga. They complement each other but compound operational complexity. Critical: is this team ready to own this in production?',
+        label: 'Pattern summary'
+    },
+    {
+        ctx: null,
+        text: '⚠️ Data consistency not mentioned yet. With eventual consistency as default, you need explicit decisions on read-your-writes guarantees for user-facing flows. This bites teams around month 6.',
+        label: 'Risk'
+    },
+];
+
+const tChunks = [
+    { t: '0:12', text: "Good morning. Today we discuss the backend rewrite on the Q3 roadmap.", live: false },
+    { t: '1:05', text: "Let's review the current architecture and identify pain points.", live: false },
+    { t: '2:18', text: "Proposal: microservices with event-driven communication.", live: false },
+    { t: '3:30', text: "Main challenge: we need to consider scalability implications before committing.", live: false },
+    { t: '4:45', text: "Also: how does this affect the deployment pipeline and on-call rotation?", live: true },
+];
+
+const promptMap = {
+    summarize: 'Summarize the conversation so far',
+    challenge: 'Challenge this — counterarguments?',
+    ambiguities: 'What are the ambiguities or unclear points?',
+    diagram: 'Draw a diagram of the main concepts',
+};
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const agentFeed = document.getElementById('agentFeed');
+const storyFeed = document.getElementById('storyFeed');
+const timerEl = document.getElementById('timer');
+const pInput = document.getElementById('pInput');
+const pSend = document.getElementById('pSend');
+const chipsRow = document.getElementById('chipsRow');
+const storyCol = document.getElementById('storyCol');
+const agentCol = document.getElementById('agentCol');
+const storyToggle = document.getElementById('storyToggle');
+
+// Collapsible Your Story — toggle a single class, that's it
+storyToggle.addEventListener('click', () => {
+    storyCol.classList.toggle('collapsed');
+});
+
+// Expandable input: hide chips on focus
+pInput.addEventListener('focus', () => {
+    chipsRow.classList.add('hidden-row');
+});
+
+pInput.addEventListener('blur', () => {
+    if (!pInput.value.trim()) {
+        chipsRow.classList.remove('hidden-row');
+    }
+});
+
+// Auto-grow textarea
+pInput.addEventListener('input', () => {
+    pInput.style.height = '30px';
+    pInput.style.height = Math.min(pInput.scrollHeight, 80) + 'px';
+});
+
+function setStatus(phase, text) {
+    statusText.textContent = text;
+    statusDot.className = 'status-dot';
+    if (phase === 'b' || phase === 'a') statusDot.classList.add('broadcasting');
+    else if (phase === 'c') statusDot.classList.add('connected');
+}
+
+function nowStr() {
+    const m = Math.floor(S.timer/60), s = S.timer%60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function addAgentMsg(msg) {
+    document.getElementById('emptyState')?.remove();
+    const typing = document.createElement('div');
+    typing.className = 'typing';
+    typing.innerHTML = `<div class="avatar" style="opacity:0.35"><i class="ph ph-robot"></i></div><div class="dots"><span></span><span></span><span></span></div>`;
+    agentFeed.appendChild(typing);
+    agentFeed.scrollTop = agentFeed.scrollHeight;
+
+    setTimeout(() => {
+        typing.remove();
+        const div = document.createElement('div');
+        div.className = 'agent-msg';
+        div.innerHTML = `
+            <div class="avatar"><i class="ph ph-robot"></i></div>
+            <div class="msg-body">
+                <div class="msg-label">${msg.label}</div>
+                ${msg.ctx ? `<div class="msg-ctx">${msg.ctx}</div>` : ''}
+                <div class="msg-text">${msg.text}</div>
+            </div>
+        `;
+        agentFeed.appendChild(div);
+        agentFeed.scrollTop = agentFeed.scrollHeight;
+        timeline.push({ t: nowStr(), role: 'agent', label: msg.label, text: msg.text, ctx: msg.ctx || null });
+    }, 900 + Math.random() * 500);
+}
+
+function addUserBubble(text) {
+    document.getElementById('emptyState')?.remove();
+    const div = document.createElement('div');
+    div.className = 'user-bubble';
+    div.innerHTML = `<div class="user-bubble-label">You</div><div class="user-bubble-text">${text}</div>`;
+    agentFeed.appendChild(div);
+    agentFeed.scrollTop = agentFeed.scrollHeight;
+    timeline.push({ t: nowStr(), role: 'user_prompt', text });
+}
+
+function addStoryChunk(chunk) {
+    document.getElementById('tEmpty')?.remove();
+    const div = document.createElement('div');
+    div.className = 't-chunk' + (chunk.live ? ' live' : '');
+    div.innerHTML = `<span class="t-chunk-time">${chunk.t}</span><span class="t-chunk-text">${chunk.text}</span>`;
+    storyFeed.appendChild(div);
+    storyFeed.scrollTop = storyFeed.scrollHeight;
+    timeline.push({ t: chunk.t, role: 'transcript', text: chunk.text });
+}
+
+function endSession() {
+    if (S.ended) return;
+    S.ended = true;
+    S.recording = false;
+    clearInterval(S.ti);
+    clearInterval(S.mi);
+    clearInterval(S.tmi);
+
+    // Swap header
+    document.getElementById('recHeader').classList.add('hidden');
+    const endedH = document.getElementById('endedHeader');
+    endedH.classList.remove('hidden');
+    document.getElementById('timerFinal').textContent = timerEl.textContent;
+
+    // Show download button
+    document.getElementById('downloadRow').classList.remove('hidden');
+    document.getElementById('downloadRow').style.display = 'flex';
+
+    // Status: session ended
+    setStatus('ended', 'Session ended');
+    statusDot.className = 'status-dot'; // grey
+
+    // Final agent summary after a beat
+    setTimeout(() => {
+        addAgentMsg({
+            ctx: null,
+            text: 'Session ended. Full summary: The team discussed migrating to event-driven microservices for Q3. Key themes: scalability, distributed tracing, Event Sourcing/CQRS/Saga patterns. Open risk: data consistency guarantees not yet decided. Recommend a follow-up focused on consistency model and operational readiness before committing.',
+            label: 'Final summary'
+        });
+    }, 1200);
+
+    // Disable prompts
+    document.querySelectorAll('.p-chip').forEach(b => { b.disabled = true; b.style.opacity = '0.4'; });
+    pInput.disabled = true;
+    pInput.placeholder = 'Session ended';
+}
+
+document.querySelectorAll('.p-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const text = promptMap[btn.dataset.p];
+        btn.classList.add('firing');
+        setTimeout(() => btn.classList.remove('firing'), 1200);
+        addUserBubble(text);
+        setTimeout(() => addAgentMsg({
+            ctx: null,
+            text: 'The discussion centers on event-driven microservices. Key themes: scalability, operational complexity, data consistency. Gap: no alignment on consistency guarantees.',
+            label: `Response: ${btn.dataset.p}`
+        }), 800);
+    });
+});
+
+function send() {
+    const t = pInput.value.trim();
+    if (!t) return;
+    pInput.value = '';
+    pInput.style.height = '30px';
+    chipsRow.classList.remove('hidden-row');
+    addUserBubble(t);
+    setTimeout(() => addAgentMsg({
+        ctx: null,
+        text: 'Core tradeoff: operational simplicity vs. system resilience. The proposal optimizes for resilience at significant complexity cost. Worth pressure-testing against team readiness.',
+        label: 'Custom'
+    }), 800);
+}
+
+pSend.addEventListener('click', send);
+pInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+function startTimer() {
+    S.ti = setInterval(() => {
+        S.timer++;
+        timerEl.textContent = `${String(Math.floor(S.timer/60)).padStart(2,'0')}:${String(S.timer%60).padStart(2,'0')}`;
+    }, 1000);
+}
+
+// Stop button: click to end session
+document.getElementById('stopBtn').addEventListener('click', endSession);
+
+// Download timeline as Markdown
+document.getElementById('downloadBtn').addEventListener('click', () => {
+    const lines = ['# Session Timeline\n'];
+    timeline.forEach(e => {
+        if (e.role === 'transcript') {
+            lines.push(`**${e.t}** _(you)_ — ${e.text}\n`);
+        } else if (e.role === 'agent') {
+            const ctx = e.ctx ? `\n> ${e.ctx}\n` : '';
+            lines.push(`**${e.t}** _(agent · ${e.label})_${ctx}\n${e.text}\n`);
+        } else if (e.role === 'user_prompt') {
+            lines.push(`**${e.t}** _(prompt)_ — ${e.text}\n`);
+        }
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'session-timeline.md';
+    a.click();
+});
+
+function runSim() {
+    startTimer();
+    setStatus('b', 'Broadcasting');
+
+    S.tmi = setInterval(() => {
+        if (S.tIdx < tChunks.length) addStoryChunk(tChunks[S.tIdx++]);
+        else clearInterval(S.tmi);
+    }, 2200);
+
+    setTimeout(() => setStatus('a', 'Awaiting agent'), 3000);
+
+    setTimeout(() => {
+        setStatus('c', 'Connected');
+        addAgentMsg(agentMsgs[0]);
+        S.msgIdx = 1;
+    }, 6000);
+
+    setTimeout(() => {
+        S.mi = setInterval(() => {
+            if (S.msgIdx < agentMsgs.length) addAgentMsg(agentMsgs[S.msgIdx++]);
+            else clearInterval(S.mi);
+        }, 5000);
+    }, 10000);
+
+    // Auto-end session after all messages for demo purposes
+    setTimeout(endSession, 32000);
+}
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    [S.ti, S.mi, S.tmi].forEach(clearInterval);
+    Object.assign(S, { timer: 0, msgIdx: 0, tIdx: 0, recording: true, ended: false });
+    timerEl.textContent = '00:00';
+    agentFeed.innerHTML = `<div class="agent-empty" id="emptyState"><i class="ph ph-robot"></i><p>Waiting for agent.<br>Broadcasting your words now.</p></div>`;
+    storyFeed.innerHTML = `<div class="t-empty" id="tEmpty">Transcription will appear as you speak.</div>`;
+    statusDot.className = 'status-dot';
+    statusText.textContent = 'Connecting';
+    storyCol.classList.remove('collapsed');
+    chipsRow.classList.remove('hidden-row');
+    pInput.value = ''; pInput.style.height = '30px';
+    pInput.disabled = false; pInput.placeholder = 'Ask the agent anything...';
+    document.querySelectorAll('.p-chip').forEach(b => { b.disabled = false; b.style.opacity = ''; });
+    // restore recording header
+    document.getElementById('recHeader').classList.remove('hidden');
+    document.getElementById('endedHeader').classList.add('hidden');
+    document.getElementById('downloadRow').classList.add('hidden');
+    timeline = [];
+    setTimeout(runSim, 400);
+});
+
+runSim();
+</script>
+</body>
+</html>

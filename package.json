@@ -1,7 +1,7 @@
 {
   "name": "stories-app",
   "productName": "Stories",
-  "version": "0.9.9",
+  "version": "0.9.10-1",
   "description": "Stories - Voice to text transcription",
   "main": "electron/main.js",
   "scripts": {
@@ -10,9 +10,11 @@
     "dev-simple": "npx electron electron/main.js --dev",
     "backend": "cd backend && python3 app.py",
     "build": "electron-forge package",
+    "test-build": "npm run make:community",
     "make": "npm run make:community",
-    "make:community": "BUILD_TYPE=community electron-forge make && BUILD_TYPE=community node scripts/post-make.js",
-    "make:internal": "BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && BUILD_TYPE=internal node scripts/post-make.js",
+    "build:backend": "./.venv/bin/pip install -q -r backend/requirements.txt && cd backend && ../.venv/bin/pyinstaller backend.spec --noconfirm --distpath ../dist --workpath ./build",
+    "make:community": "npm run build:backend && BUILD_TYPE=community electron-forge make && BUILD_TYPE=community node scripts/post-make.js",
+    "make:internal": "npm run build:backend && BUILD_TYPE=internal ENABLE_TELEMETRY=true electron-forge make && BUILD_TYPE=internal node scripts/post-make.js",
     "notarize": "./scripts/notarize.sh",
     "notarize:check": "./scripts/check-notarization.sh",
     "notarize:status": "xcrun notarytool history --keychain-profile \"pixelspace-notarize\"",
@@ -57,7 +59,7 @@
   },
   "dependencies": {
     "@jitsi/robotjs": "^0.6.18",
-    "axios": "^1.5.0",
+    "axios": "1.12.2",
     "electron-updater": "^6.6.2",
     "sqlite3": "^5.1.7"
   }
