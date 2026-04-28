@@ -12,6 +12,15 @@ app.commandLine.appendSwitch('remote-debugging-port', '9222');
 app.commandLine.appendSwitch('remote-allow-origins', '*');
 const { autoUpdater } = require('electron-updater');
 
+// Swallow EPIPE on stdout/stderr (parent pipe may close after launch).
+// Without this, any console.* after the pipe closes throws Uncaught Exception.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (err) => {
+    if (err && err.code === 'EPIPE') return;
+    throw err;
+  });
+}
+
 // ====================================
 // LOGGING SETUP
 // ====================================
@@ -48,7 +57,7 @@ console.log = (...args) => {
       // Silently fail if stream is closed
     }
   }
-  originalConsoleLog(...args);
+  try { originalConsoleLog(...args); } catch (e) { /* stdout pipe closed */ }
 };
 
 console.error = (...args) => {
@@ -63,7 +72,7 @@ console.error = (...args) => {
       // Silently fail if stream is closed
     }
   }
-  originalConsoleError(...args);
+  try { originalConsoleError(...args); } catch (e) { /* stderr pipe closed */ }
 };
 
 console.warn = (...args) => {
@@ -78,7 +87,7 @@ console.warn = (...args) => {
       // Silently fail if stream is closed
     }
   }
-  originalConsoleWarn(...args);
+  try { originalConsoleWarn(...args); } catch (e) { /* stderr pipe closed */ }
 };
 
 // Log startup
