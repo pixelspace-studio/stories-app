@@ -96,6 +96,19 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.10-1
+───────────────────────────────────────────────────────────────
+
+INTEGRATION RELEASE
+  • Combines everything from v0.9.9 (Florencia's main-branch fixes)
+    with v0.9.9-4 (Gemini STT + Smart Transforms + Real-time Feed)
+    so both feature lines live on a single trunk again
+  • No new user-facing features in this version itself — see the
+    sections below for what each predecessor brought in
+  • Audio pipeline now has BOTH our silence-skip / pause-resume /
+    fluid pause AND main's chunk-retry + averaging downsampler
+
+
 📝 CHANGELOG — v0.9.9-4
 ───────────────────────────────────────────────────────────────
 
@@ -166,7 +179,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.9-4
+Version: 0.9.10-1
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────

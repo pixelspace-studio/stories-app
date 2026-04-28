@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.10-1] - 2026-04-25
+
+**Integration release.** Brings the long-running `feature/gemini-stt`
+chain (fluid-transcription → realtime-agent-feed → smart-tools →
+gemini-stt) onto the same trunk as the post-release fixes that
+landed directly on `main` (#17 Windows auto-paste, #18 fluid
+reliability + widget timer freeze, #19 View More visibility,
+#20 scrollable class cleanup, version bump to 0.9.9, BUILD_TYPE
+plumbing for post-make).
+
+No new user-facing features in this version itself — see the
+[0.9.9-4] and [0.9.9] sections below for the actual feature work
+that this release combines.
+
+### Notes
+- During the merge, `frontend/components/FluidTranscriptionManager.js`
+  was hand-merged so PR #18's chunk retry loop and averaging
+  downsampler coexist with our pause()/resume(), silence detection
+  (RMS skip) and `_calculateRMS` helper.
+- Settings UI keeps both dropdowns: main's full-width microphone
+  selector and our constrained STT model dropdown — the latter is
+  scoped via `#sttModelSelect.setting-select` to avoid leaking the
+  pill style onto the mic selector.
+- `frontend/app.js` got PR #19 + PR #20's View More fixes applied
+  by hand on top of our version (the changes were tiny: `>` →
+  `>=`, drop the redundant overflow probe, always clean up the
+  `scrollable` class, reset `showingAll` on history clear).
+
+### Known follow-up
+- `electron/main.js` still uses inline AppleScript in the
+  recording-toggle path instead of PR #17's cross-platform
+  `detectCurrentApp()` helper. The helper is already defined in
+  the file (it's used in the separate auto-paste call site), so
+  re-wiring the toggle path is a small isolated cleanup.
+
+---
+
 ## [0.9.9-4] - 2026-04-25
 
 ### Added
