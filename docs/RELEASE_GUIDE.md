@@ -162,20 +162,144 @@ The DMG is:
 
 ## 🔄 **FOR FUTURE VERSIONS**
 
-Each time you have a new version:
+Each time you cut a new version, **bump the version in 3 places** (they
+must match or the in-DMG README and Settings will lie about which build
+the user has):
 
-1. **Update version number** in `package.json`
-2. **Fix bugs** you want to solve
-3. **Compile backend** if you made changes in Python:
-   ```bash
-   cd backend && pyinstaller backend.spec && cp dist/stories-backend ../dist/
+1. `package.json` → `"version"` field
+2. `CHANGELOG.md` → add a new `## [<version>] - YYYY-MM-DD` block at the
+   top with `### Added` / `### Changed` / `### Fixed` sections
+3. `DMG_README.txt` → add a new `📝 CHANGELOG — v<version>` section
+   AND update the `Version: <version>` line at the bottom
+
+Then:
+
+```bash
+npm run release        # signed + notarized (production)
+# OR
+npm run make:community # local DMG, unsigned if no cert (testing / dev)
+```
+
+`npm run make:community` automatically runs `build:backend` first, which
+reinstalls Python deps from `backend/requirements.txt` and rebuilds
+`dist/stories-backend` via PyInstaller. **You no longer need to call
+`pyinstaller` by hand** before building the DMG — it happens for you.
+
+---
+
+## ➕ **ADDING A NEW PYTHON DEPENDENCY**
+
+PyInstaller bundles Python at build time. If you skip step 2 below the
+DMG will look fine but the bundled backend will crash at import time
+(observable as HTTP 401 / 500 on every `/api/transcribe/*` call from a
+freshly installed build, while everything works perfectly in `npm start`
+dev mode).
+
+1. Add the package to `backend/requirements.txt` with a pinned version,
+   e.g. `google-genai==1.73.1`. The `build:backend` step will pip-install
+   it on next build.
+2. **If the new package or any of your own modules is imported lazily,
+   conditionally, or only inside a function**, add it to `hiddenimports`
+   in `backend/backend.spec`. PyInstaller's static analysis can miss
+   these. Example from the gemini-stt work:
+
+   ```python
+   hiddenimports=[
+       ...
+       'gemini_transcription',     # our new module
+       'google',                   # parent
+       'google.genai',
+       'google.genai.client',
+       'google.genai.types',
+   ],
    ```
-4. **Execute:**
-   ```bash
-   npm run release
-   ```
-5. **Wait 5-15 minutes** while Apple notarizes
-6. **Distribute** the DMG from `out/make/Stories.dmg`
+
+3. Rebuild and **smoke-test the packaged build** — not just `npm start`.
+   The dev server uses your system Python and won't surface missing
+   `hiddenimports`.
+
+---
+
+## 🛠️ **BUILDING WITHOUT THE CODE SIGNING CERT**
+
+Community contributors and CI environments that don't have the
+`Developer ID Application: Pixelspace, LLC (N7MMJYTBG2)` certificate
+in their keychain can still build a working DMG locally:
+
+```bash
+npm run make:community
+```
+
+You will see `❌ DMG signing failed: ... no identity found` near the
+end. **That's expected.** The DMG is still produced at
+`out/make/Stories-v<version>-community.dmg` and works on macOS — Gate-
+keeper just shows a "from an unidentified developer" prompt the first
+time the user opens it (right-click → Open works around this).
+
+For public distribution you need the cert. See `docs/CODE_SIGNING.md`.
+
+---
+
+## 📤 **PUBLISHING TO GITHUB RELEASES**
+
+DMGs do **not** live in the git repo (`out/` is gitignored). To make a
+build downloadable, attach it to a GitHub Release:
+
+```bash
+gh release create v<version>-community --draft \
+  --title "Stories v<version> (Community)" \
+  --notes-file CHANGELOG.md \
+  out/make/Stories-v<version>-community.dmg
+```
+
+The Release is created as a draft so you can review before publishing.
+List existing releases with `gh release list`.
+
+---
+
+## ⚠️ **COMMON GOTCHAS**
+
+- **HTTP 401 on every chunk after installing a new build, but Settings
+  still shows your key.** The bundled backend wrote `secure.enc` with a
+  machine_id derived from `os.environ.get('USER')`, which differs across
+  launch contexts. Fix shipped in 0.9.10-1 (stable `pwd`-based id +
+  one-time decryption migration). If you hit this on an OLDER build,
+  the workaround is Settings → Remove + Add the keys.
+- **DMG seems built but missing your latest backend changes.** You ran
+  `electron-forge make` directly instead of `npm run make:community`.
+  The forge command does not rebuild the PyInstaller bundle. Always go
+  through the npm scripts.
+- **Stories.app launches but immediately shows "Network Error" in
+  Settings.** Almost always means port 57002 is already in use by a
+  stale Python from a previous run. Kill it with
+  `lsof -ti:57002 | xargs -r kill -9` and relaunch.
+- **The build prints "✅" but `out/make/` looks empty.** You're in
+  the wrong working directory. The npm scripts use relative paths and
+  `cd backend` mid-pipeline; always run them from the repo root.
+
+---
+
+## 🤖 **FOR AI CODING AGENTS**
+
+Quick orientation if you've been dropped into this repo to build:
+
+- **One command to remember**: `npm run make:community`. It handles
+  Python venv install, PyInstaller bundle, electron-forge package, DMG
+  modification, and DMG signing (if cert is present).
+- **Three files for version bumps**: `package.json`, `CHANGELOG.md`,
+  `DMG_README.txt`. Mismatch = silent confusion for the user.
+- **Two files for new Python deps**: `backend/requirements.txt`
+  (always) and `backend/backend.spec` `hiddenimports` (if the import is
+  lazy/conditional).
+- **Never commit**: anything under `out/`, `dist/`, `backend/build/`,
+  or any `secure.enc` / `*.dmg` / `node_modules/`. Already gitignored.
+- **Never bypass build robustness**: don't disable `build:backend` to
+  go faster. The 90s it adds prevents the entire class of "stale
+  bundle" bugs we hit pre-0.9.10.
+- **Before reporting "build worked"**: actually open the resulting
+  `.dmg`, install it, and exercise the changed code path. The dev mode
+  (`npm start`) uses system Python and will not surface PyInstaller
+  bundling issues.
 
 ---
 
