@@ -104,6 +104,36 @@ def transcribe_with_gemini(
             ],
         )
 
+        # Detect blocked / refused responses BEFORE returning success.
+        # Without this check, a safety-blocked response yields empty text but
+        # success=True, which silently bypasses the cross-engine fallback.
+        block_reason = getattr(getattr(response, 'prompt_feedback', None), 'block_reason', None)
+        block_name = getattr(block_reason, 'name', None) or (str(block_reason) if block_reason else None)
+        candidates = getattr(response, 'candidates', None) or []
+        finish_reason = getattr(candidates[0], 'finish_reason', None) if candidates else None
+        finish_name = getattr(finish_reason, 'name', None) or (str(finish_reason) if finish_reason else None)
+        BLOCKED_FINISH = {'SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'OTHER'}
+
+        if block_name or (finish_name and finish_name in BLOCKED_FINISH):
+            reason_code = block_name or finish_name
+            REASON_MESSAGES = {
+                'SAFETY': "Gemini's safety filter blocked the audio (it flagged content as unsafe — e.g. harassment, hate, sexual, or dangerous).",
+                'PROHIBITED_CONTENT': "Gemini blocked the audio for violating its content policy.",
+                'RECITATION': "Gemini blocked the response because it would have reproduced copyrighted or memorized material.",
+                'BLOCKLIST': "Gemini blocked the response because it matched terms in a configured blocklist.",
+                'SPII': "Gemini blocked the response because it contained sensitive personal information.",
+                'OTHER': "Gemini refused the request without a specific reason.",
+            }
+            friendly = REASON_MESSAGES.get(reason_code, f"Gemini refused the request (reason: {reason_code}).")
+            logger.warning(f"⚠️ Gemini refused transcription ({reason_code}) — triggering fallback")
+            return RetryResult(
+                success=False,
+                data=None,
+                error=friendly,
+                attempts=1,
+                retry_reason=RetryReason.UNKNOWN_ERROR,
+            )
+
         text = (getattr(response, 'text', None) or '').strip()
         duration = audio_duration if audio_duration else None
 

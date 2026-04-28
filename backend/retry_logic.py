@@ -484,7 +484,12 @@ def get_user_friendly_error(retry_reason: RetryReason, error_details: str = "") 
         
         if "corrupted" in error_lower or "invalid audio" in error_lower or "cannot decode" in error_lower or "unsupported format" in error_lower:
             return "Audio file is corrupted or unreadable. Please check your microphone and try again."
-    
+
+        # Gemini block / refusal — surface the specific reason verbatim
+        # (gemini_transcription.py emits human-readable messages starting with "Gemini")
+        if error_lower.startswith("gemini") and ("blocked" in error_lower or "refused" in error_lower):
+            return error_details
+
     # Fallback to retry reason messages
     messages = {
         RetryReason.NETWORK_ERROR: "Network connection issue. Please check your internet connection.",
