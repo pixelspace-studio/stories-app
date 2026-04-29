@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.10-4] - 2026-04-29
+
+### Changed
+- **Copy Logs to Clipboard now trims the backend log** to the last 3
+  transcriptions (plus 30 lines of pre-context per transcription).
+  The full backend log was overflowing AI assistant context windows
+  when shared. Frontend log is still copied in full. The trimmed
+  bundle includes a note about how many transcriptions were
+  included; the raw file is still one click away via "View Logs →
+  Backend Log".
+
+---
+
 ## [0.9.10-3] - 2026-04-28
 
 ### Added

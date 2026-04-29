@@ -96,6 +96,17 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.10-4
+───────────────────────────────────────────────────────────────
+
+QUALITY OF LIFE
+  • Copy Logs to Clipboard now trims the backend log to the last
+    3 transcriptions, so the bundle fits comfortably in an AI
+    assistant's context window when you share it. Frontend log is
+    still copied in full. Need everything? "View Logs → Backend
+    Log" still opens the raw file
+
+
 📝 CHANGELOG — v0.9.10-3
 ───────────────────────────────────────────────────────────────
 
@@ -201,7 +212,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.10-3
+Version: 0.9.10-4
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────

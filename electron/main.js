@@ -554,11 +554,42 @@ function updateTrayMenu() {
           catch (e) { return `(could not read ${p}: ${e.message})`; }
         };
 
+        // Backend log grows unbounded and easily overflows AI context windows.
+        // Trim it to roughly the last N transcriptions by detecting the start
+        // markers we already emit, and keep some pre-context so each
+        // transcription has its setup/dictionary lines.
+        const trimBackendLog = (content, n = 3) => {
+          const lines = content.split('\n');
+          const startRe = /(🔄 Fluid chunk received:.*\bsegment=0\b|Transcription attempt 1\/)/;
+          const starts = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (startRe.test(lines[i])) starts.push(i);
+          }
+          if (starts.length === 0) {
+            const TAIL_BYTES = 200_000;
+            const tail = content.length > TAIL_BYTES ? content.slice(-TAIL_BYTES) : content;
+            return {
+              text: tail,
+              note: `(no transcription markers found; showing last ${(tail.length / 1024).toFixed(0)} KB of ${(content.length / 1024).toFixed(0)} KB)`,
+            };
+          }
+          const included = Math.min(n, starts.length);
+          // 30 lines of pre-context before the earliest included start (request setup,
+          // any dictionary load, prior errors that may have triggered a retry).
+          const sliceFrom = Math.max(0, starts[starts.length - included] - 30);
+          return {
+            text: lines.slice(sliceFrom).join('\n'),
+            note: `(trimmed to last ${included} transcription${included === 1 ? '' : 's'} of ${starts.length} found — full log via "View Logs → Backend Log")`,
+          };
+        };
+
         try {
-          const [frontendContent, backendContent] = await Promise.all([
+          const [frontendContent, backendContentRaw] = await Promise.all([
             readOrMissing(frontendLog),
             readOrMissing(backendLog),
           ]);
+
+          const { text: backendContent, note: backendNote } = trimBackendLog(backendContentRaw, 3);
 
           const sep = '═'.repeat(72);
           const bundle = [
@@ -573,6 +604,7 @@ function updateTrayMenu() {
             '',
             sep,
             `BACKEND (backend.log) — ${backendLog}`,
+            backendNote,
             sep,
             backendContent,
             '',
