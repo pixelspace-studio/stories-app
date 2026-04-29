@@ -195,7 +195,30 @@
                 <h2 class="settings-title">Settings</h2>
             </div>
             <div class="settings-options">
-                <!-- API Keys group -->
+                <!-- ============================================ -->
+                <!-- TRANSCRIPTION -->
+                <!-- ============================================ -->
+                <div class="settings-section-header">Transcription</div>
+
+                <!-- STT Model Selector -->
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">STT model</span>
+                            <span class="setting-tooltip" title="Choose which model transcribes your audio">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                    </div>
+                    <select id="sttModelSelect" class="setting-select">
+                        <option value="whisper">Whisper</option>
+                        <option value="gemini-flash-lite">Gemini Flash Lite</option>
+                    </select>
+                </div>
+
+                <!-- ============================================ -->
+                <!-- API KEYS -->
+                <!-- ============================================ -->
                 <div class="settings-section-header">API Keys</div>
 
                 <!-- OpenAI Key (no key) -->
@@ -240,19 +263,23 @@
                     </div>
                 </div>
 
-                <!-- STT Model Selector -->
+                <!-- ============================================ -->
+                <!-- RECORDING -->
+                <!-- ============================================ -->
+                <div class="settings-section-header">Recording</div>
+
+                <!-- Microphone Selection -->
                 <div class="setting-item setting-item-vertical">
                     <div class="setting-row">
                         <div class="setting-label-group">
-                            <span class="setting-label">STT model</span>
-                            <span class="setting-tooltip" title="Choose which model transcribes your audio">
+                            <span class="setting-label">Microphone</span>
+                            <span class="setting-tooltip" title="Choose which microphone to use for recording">
                                 <i class="ph ph-info"></i>
                             </span>
                         </div>
                     </div>
-                    <select id="sttModelSelect" class="setting-select">
-                        <option value="whisper">Whisper</option>
-                        <option value="gemini-flash-lite">Gemini Flash Lite</option>
+                    <select id="microphoneSelect" class="setting-select">
+                        <option value="default">System Default</option>
                     </select>
                 </div>
 
@@ -304,21 +331,33 @@
                     </div>
                 </div>
 
-                <!-- Auto-hide Widget Toggle -->
-                <div class="setting-item">
+                <!-- Save Audio Toggle -->
+                <div class="setting-item setting-item-vertical">
                     <div class="setting-row">
-                        <div class="setting-label-group">
-                            <span class="setting-label">Auto-hide widget</span>
-                            <span class="setting-tooltip" title="Show only when recording and transcribing">
-                                <i class="ph ph-info"></i>
-                            </span>
-                        </div>
+                        <span class="setting-label">Save audio files</span>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="autoHideWidgetToggle">
+                            <input type="checkbox" id="saveAudioToggle" checked>
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
+
+                    <!-- Audio Storage Management (Only visible when Save Audio is enabled AND has files) -->
+                    <div id="audioStorageSection" class="audio-storage-section hidden">
+                        <button class="icon-button-neutral hidden" id="openAudioFolderButton" title="Open Audio Folder">
+                            <i class="ph ph-folder"></i>
+                        </button>
+                        <span id="storageSeparator" class="storage-separator hidden">·</span>
+                        <span id="storageStatsText" class="storage-stats-text hidden">Storage: -- MB (-- files)</span>
+                        <button class="icon-button-delete hidden" id="cleanupAudioButton" title="Clear all audio files">
+                            <i class="ph ph-trash"></i>
+                        </button>
+                    </div>
                 </div>
+
+                <!-- ============================================ -->
+                <!-- DEFAULTS -->
+                <!-- ============================================ -->
+                <div class="settings-section-header">Defaults</div>
 
                 <!-- Auto-paste Toggle -->
                 <div class="setting-item">
@@ -331,6 +370,22 @@
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="autoPasteToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Auto-hide Widget Toggle -->
+                <div class="setting-item">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Auto-hide widget</span>
+                            <span class="setting-tooltip" title="Show only when recording and transcribing">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoHideWidgetToggle">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
@@ -350,44 +405,6 @@
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                </div>
-
-                <!-- Microphone Selection -->
-                <div class="setting-item setting-item-vertical">
-                    <div class="setting-row">
-                        <div class="setting-label-group">
-                            <span class="setting-label">Microphone</span>
-                            <span class="setting-tooltip" title="Choose which microphone to use for recording">
-                                <i class="ph ph-info"></i>
-                            </span>
-                        </div>
-                    </div>
-                    <select id="microphoneSelect" class="setting-select">
-                        <option value="default">System Default</option>
-                    </select>
-                </div>
-
-                <!-- Save Audio Toggle -->
-                <div class="setting-item setting-item-vertical">
-                    <div class="setting-row">
-                        <span class="setting-label">Save audio files</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="saveAudioToggle" checked>
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-
-            <!-- Audio Storage Management (Only visible when Save Audio is enabled AND has files) -->
-            <div id="audioStorageSection" class="audio-storage-section hidden">
-                <button class="icon-button-neutral hidden" id="openAudioFolderButton" title="Open Audio Folder">
-                    <i class="ph ph-folder"></i>
-                </button>
-                <span id="storageSeparator" class="storage-separator hidden">·</span>
-                <span id="storageStatsText" class="storage-stats-text hidden">Storage: -- MB (-- files)</span>
-                <button class="icon-button-delete hidden" id="cleanupAudioButton" title="Clear all audio files">
-                    <i class="ph ph-trash"></i>
-                </button>
-            </div>
                 </div>
 
                 <!-- Telemetry Toggle (only shown in internal builds) -->
