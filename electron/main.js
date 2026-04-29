@@ -538,6 +538,59 @@ function updateTrayMenu() {
         }
       ]
     },
+    {
+      label: 'Copy Logs to Clipboard',
+      click: async () => {
+        const { clipboard, Notification } = require('electron');
+        const fs = require('fs').promises;
+        const path = require('path');
+        const os = require('os');
+
+        const frontendLog = path.join(os.homedir(), 'Library', 'Logs', 'Stories', 'main.log');
+        const backendLog = path.join(os.homedir(), 'Library', 'Application Support', 'Stories', 'backend.log');
+
+        const readOrMissing = async (p) => {
+          try { return await fs.readFile(p, 'utf8'); }
+          catch (e) { return `(could not read ${p}: ${e.message})`; }
+        };
+
+        try {
+          const [frontendContent, backendContent] = await Promise.all([
+            readOrMissing(frontendLog),
+            readOrMissing(backendLog),
+          ]);
+
+          const sep = '═'.repeat(72);
+          const bundle = [
+            sep,
+            `STORIES LOGS — copied ${new Date().toISOString()}`,
+            sep,
+            '',
+            sep,
+            `FRONTEND (main.log) — ${frontendLog}`,
+            sep,
+            frontendContent,
+            '',
+            sep,
+            `BACKEND (backend.log) — ${backendLog}`,
+            sep,
+            backendContent,
+            '',
+          ].join('\n');
+
+          clipboard.writeText(bundle);
+
+          try {
+            new Notification({
+              title: 'Stories logs copied',
+              body: `${(bundle.length / 1024).toFixed(0)} KB on the clipboard. Paste anywhere.`,
+            }).show();
+          } catch (_) { /* notifications optional */ }
+        } catch (error) {
+          console.error('❌ Error copying logs to clipboard:', error);
+        }
+      }
+    },
     { type: 'separator' },
     {
       label: 'Quit Stories',

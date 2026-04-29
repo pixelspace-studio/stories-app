@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.10-3] - 2026-04-28
+
+### Added
+- **Tray menu → Copy Logs to Clipboard.** Single click bundles
+  `main.log` (frontend) and `backend.log` (backend) into one labeled
+  text block on the clipboard, ready to paste into a bug report or
+  chat. Avoids the previous flow of opening two Finder folders and
+  attaching two files.
+
+---
+
 ## [0.9.10-2] - 2026-04-28
 
 ### Fixed

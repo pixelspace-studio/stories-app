@@ -96,6 +96,16 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.10-3
+───────────────────────────────────────────────────────────────
+
+QUALITY OF LIFE
+  • New tray menu item: "Copy Logs to Clipboard". Bundles the
+    frontend and backend logs into a single labeled text block and
+    drops it on your clipboard — paste straight into a bug report
+    or chat (no more digging through Finder for two files)
+
+
 📝 CHANGELOG — v0.9.10-2
 ───────────────────────────────────────────────────────────────
 
@@ -191,7 +201,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.10-2
+Version: 0.9.10-3
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────
