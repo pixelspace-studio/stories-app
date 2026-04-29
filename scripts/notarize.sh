@@ -49,12 +49,18 @@ if [ -z "$APPLE_KEYCHAIN_PROFILE" ]; then
     exit 1
 fi
 
-# Check if DMG exists - auto-detect versioned DMG (community or internal)
-# Prefer BUILD_TYPE env var if set, otherwise fall back to any match
+# Check if DMG exists - auto-detect versioned DMG (community or internal).
+# Prefer BUILD_TYPE env var if set; otherwise accept any community/internal DMG.
+# Pre-release suffixes (e.g. v0.9.10-1) are accepted in both branches.
+# When multiple match, pick the most recently modified one.
 if [ -n "$BUILD_TYPE" ]; then
-    DMG_PATH=$(find out/make -name "Stories-v*-${BUILD_TYPE}.dmg" -type f | head -1)
+    DMG_PATH=$(find out/make -name "Stories-v*-${BUILD_TYPE}.dmg" -type f -print0 \
+        | xargs -0 ls -t 2>/dev/null | head -1)
 else
-    DMG_PATH=$(find out/make -name "Stories-v*.dmg" -type f | grep -E "Stories-v[0-9]+\.[0-9]+\.[0-9]+-(community|internal)\.dmg$" | head -1)
+    DMG_PATH=$(find out/make -name "Stories-v*.dmg" -type f -print0 \
+        | xargs -0 ls -t 2>/dev/null \
+        | grep -E "Stories-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?-(community|internal)\.dmg$" \
+        | head -1)
 fi
 
 if [ -z "$DMG_PATH" ]; then

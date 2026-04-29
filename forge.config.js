@@ -24,6 +24,12 @@ module.exports = {
       /\.pyc$/,
       /\.pkg$/,
       /backend\.spec$/,
+      // Exclude Python virtualenv created for backend builds — PyInstaller
+      // bootloader binaries inside .venv are unsigned and break notarization.
+      // Only ./dist/stories-backend (the compiled PyInstaller output) ships.
+      /^\/\.venv($|\/)/,
+      /^\/dist($|\/)/,
+      /^\/out($|\/)/,
       // Exclude robotjs build artifacts (not needed in production)
       /@jitsi\/robotjs\/build\/Release\/obj\.target/,
       /\/obj\.target\//,  // Exclude all obj.target directories
