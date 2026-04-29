@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.10-2] - 2026-04-28
+
+### Fixed
+- **Gemini transcription occasionally appended dictionary words to the
+  output.** When a Stories dictionary was configured (e.g. "Pixelspace,
+  Claude, ChatGPT, Lookie"), Gemini sometimes echoed the list at the end
+  of the transcript. Whisper treats the prompt as a soft hint and rarely
+  emits it verbatim; Gemini is a chat model and would happily include it.
+  The vocabulary is now wrapped in an explicit "DO NOT TRANSCRIBE THIS
+  LIST" instruction block.
+- **Slow Gemini chunks could stall a recording for over a minute.** A
+  single Gemini call would occasionally hang server-side (observed: 73s
+  while sibling chunks of the same recording finished in 3s), blocking
+  `fluid-complete` from returning until the slow chunk eventually came
+  back. Each Gemini call is now capped at 10s with up to 3 attempts; if
+  all attempts time out the existing cross-engine fallback to Whisper
+  takes over.
+
+---
+
 ## [0.9.10-1] - 2026-04-25
 
 **Integration release.** Brings the long-running `feature/gemini-stt`

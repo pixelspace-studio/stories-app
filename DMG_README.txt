@@ -96,6 +96,18 @@ LOCAL NETWORK (Required)
 ✓ Open source - all code is auditable
 
 
+📝 CHANGELOG — v0.9.10-2
+───────────────────────────────────────────────────────────────
+
+GEMINI RELIABILITY FIXES
+  • Dictionary words (Pixelspace, Claude, ChatGPT, etc.) no longer
+    get appended to Gemini transcriptions — they are now treated as
+    a strict spelling reference, not as text to echo
+  • Slow Gemini calls (occasional 60s+ hangs on the preview model)
+    now time out at 10s and retry up to 3 times before falling back
+    to Whisper — recordings no longer stall waiting on one bad chunk
+
+
 📝 CHANGELOG — v0.9.10-1
 ───────────────────────────────────────────────────────────────
 
@@ -179,7 +191,7 @@ Issues or questions? Open an issue on GitHub!
 
 
 ───────────────────────────────────────────────────────────────
-Version: 0.9.10-1
+Version: 0.9.10-2
 License: MIT License
 Made with ❤️  by Pixelspace
 ───────────────────────────────────────────────────────────────

@@ -25,6 +25,14 @@ GEMINI_MODELS = {
 # leave cost at 0 to avoid misleading numbers in the UI.
 GEMINI_COST_PER_MINUTE_USD = 0.0
 
+# Gemini occasionally leaves a request hanging server-side (observed: 73s for
+# a chunk while sibling chunks of the same recording finished in 3s). Cap each
+# attempt and retry rather than blocking fluid-complete waiting on one slow
+# call. After GEMINI_MAX_ATTEMPTS we surface the timeout so the cross-engine
+# fallback in app.run_transcription() can take over (Whisper).
+GEMINI_TIMEOUT_MS = 10_000
+GEMINI_MAX_ATTEMPTS = 3
+
 
 def _audio_mime(path: str) -> str:
     ext = os.path.splitext(path)[1].lower().lstrip('.')
@@ -79,13 +87,42 @@ def transcribe_with_gemini(
         "Return only the transcript text, no preamble, no commentary, no timestamps."
     )
     if prompt:
-        base_instruction += (
-            "\n\nWhen you encounter the following proper nouns / domain terms, "
-            "spell them exactly as written here: " + prompt
-        )
+        # `prompt` arrives in Whisper-prompt format, typically the literal
+        # string "Vocabulary: Foo, Bar, Baz". Whisper treats that as soft
+        # context and rarely emits the words verbatim. Gemini is a chat
+        # model and will echo the list at the end of the transcript unless
+        # we tell it very forcefully NOT to. So:
+        #   1. Strip the "Vocabulary:" prefix so it reads as a clean list.
+        #   2. Wrap it in an explicit hint block that bans inclusion.
+        vocab = prompt
+        for prefix in ("Vocabulary:", "vocabulary:"):
+            if vocab.startswith(prefix):
+                vocab = vocab[len(prefix):]
+                break
+        vocab = vocab.strip()
+        if vocab:
+            base_instruction += (
+                "\n\n=== VOCABULARY HINT — DO NOT TRANSCRIBE THIS LIST ===\n"
+                "The list of words below is a SPELLING REFERENCE for proper nouns "
+                "and domain terms the speaker may use. Use these rules:\n"
+                "  • DO NOT include any of these words in the transcript unless "
+                "the speaker actually says them in the audio.\n"
+                "  • DO NOT append the list to the transcript.\n"
+                "  • DO NOT mention this hint, the word 'vocabulary', or anything "
+                "about a reference list.\n"
+                "  • ONLY use these spellings if you hear sounds that match them, "
+                "and ONLY in place of the matching words you would otherwise write.\n"
+                f"Reference spellings: {vocab}\n"
+                "=== END OF VOCABULARY HINT ==="
+            )
 
     try:
-        client = genai.Client(api_key=api_key)
+        from google.genai import types as genai_types
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(timeout=GEMINI_TIMEOUT_MS),
+        )
 
         with open(audio_file_path, 'rb') as f:
             audio_bytes = f.read()
@@ -96,13 +133,34 @@ def transcribe_with_gemini(
 
         # Inline audio bytes — works for files up to ~20 MB. Larger files would
         # need the Files API; Stories chunks/recordings are well below that.
-        response = client.models.generate_content(
-            model=model,
-            contents=[
-                base_instruction,
-                {'inline_data': {'mime_type': mime, 'data': audio_bytes}},
-            ],
-        )
+        response = None
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, GEMINI_MAX_ATTEMPTS + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[
+                        base_instruction,
+                        {'inline_data': {'mime_type': mime, 'data': audio_bytes}},
+                    ],
+                )
+                if attempt > 1:
+                    logger.info(f"✅ Gemini recovered on attempt {attempt}/{GEMINI_MAX_ATTEMPTS}")
+                break
+            except Exception as e:
+                msg = str(e).lower()
+                is_timeout = ('timeout' in msg or 'timed out' in msg
+                              or 'deadline' in msg or 'read timed out' in msg)
+                if is_timeout and attempt < GEMINI_MAX_ATTEMPTS:
+                    logger.warning(
+                        f"⏱️ Gemini timeout after {GEMINI_TIMEOUT_MS}ms "
+                        f"(attempt {attempt}/{GEMINI_MAX_ATTEMPTS}), retrying..."
+                    )
+                    last_exc = e
+                    continue
+                raise
+        if response is None:
+            raise last_exc if last_exc else RuntimeError("Gemini returned no response")
 
         # Detect blocked / refused responses BEFORE returning success.
         # Without this check, a safety-blocked response yields empty text but
