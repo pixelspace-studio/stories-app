@@ -8,13 +8,16 @@ Stories ships as a signed/notarized macOS DMG (and Windows zip). Versions follow
 
 ### When the user asks for a local build
 
-Run from project root:
+There are two flavors:
 
-```bash
-npm run make:community         # signed (if cert present), notarized DMG → out/make/
-```
+| Flavor | Command | Where allowed | Telemetry | Audience |
+|--------|---------|---------------|-----------|----------|
+| **internal** | `npm run make:internal` | any branch | enabled | Pixelspace team / dogfooding / shared via GitHub prereleases |
+| **community** | `npm run make:community` | **only `main`** | disabled | outside users / official releases |
 
-This bundles the Python backend (pyinstaller) and packages the Electron app. Output lands in `out/make/Stories-v<version>-community.dmg`. If the Pixelspace signing cert isn't in the keychain, the DMG is still produced unsigned — flag this to the user; they can install locally but can't distribute.
+**Default to `make:internal`** unless the user is explicitly cutting a public release from `main`. The `make:community` script enforces this with `scripts/guard-community-branch.js` — it will hard-fail on any branch other than `main`. There is no override.
+
+Both bundle the Python backend (pyinstaller) and package the Electron app. Output lands in `out/make/Stories-v<version>-<flavor>.dmg`. If the Pixelspace signing cert isn't in the keychain, the DMG is still produced unsigned — flag this to the user; they can install locally but can't distribute without the `xattr -dr com.apple.quarantine` workaround.
 
 **Before building, always:**
 1. Bump `package.json` version to the next `-N` suffix (e.g. `-4` → `-5`). Don't reuse a version that was already built.
@@ -36,6 +39,24 @@ A local build produces a binary that may end up on someone's machine. To prevent
    ```
 
 Before bumping, check existing `built/*` tags (`git tag -l 'built/*'`) and the latest release tag to pick a number nobody has claimed.
+
+### Distributing a build to the team
+
+For internal builds (the common case), upload the DMG to a GitHub prerelease attached to the same `built/<version>` tag:
+
+```bash
+gh release create built/0.9.10-5 \
+  out/make/Stories-v0.9.10-5-internal.dmg \
+  --prerelease \
+  --title "0.9.10-5 (internal build by <name>)" \
+  --notes "..."
+```
+
+In the release notes, **always** include the unquarantine command if the DMG is unsigned, since the Pixelspace cert isn't always available locally:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Stories.app
+```
 
 ### Official release builds (CI)
 
