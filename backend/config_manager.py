@@ -110,11 +110,10 @@ class ConfigurationManager:
     def _get_machine_id(self) -> str:
         """Get a stable machine identifier for encryption.
 
-        Uses pwd.getpwuid(os.getuid()).pw_name which is always available
-        regardless of how the process is launched. This avoids the previous
-        bug where packaged Electron apps lost user keys because USER was
-        unset in the launch environment and we silently fell back to
-        'default'.
+        Uses only the POSIX user name. macOS rotates `os.uname().nodename`
+        between values like 'Mac.lan', 'Mac.local', and 'Arturos-MBP.local'
+        as Bonjour/Wi-Fi state changes — including that here meant secure.enc
+        silently failed to decrypt and the user's API keys appeared to vanish.
         """
         try:
             import pwd
@@ -122,8 +121,7 @@ class ConfigurationManager:
         except Exception:
             # Fallback for non-POSIX (Windows) or weird envs
             user = os.environ.get('USER') or os.environ.get('USERNAME') or 'default'
-        machine_info = f"{os.uname().nodename}_{user}"
-        return hashlib.sha256(machine_info.encode()).hexdigest()[:16]
+        return hashlib.sha256(user.encode()).hexdigest()[:16]
 
     def _legacy_machine_ids(self) -> list:
         """Plausible OLD machine IDs we may have written secure.enc with.
@@ -134,25 +132,39 @@ class ConfigurationManager:
         """
         candidates = []
         try:
-            # Cover every value `os.environ.get('USER', 'default')` could
-            # have returned across the various launch contexts (dev shell,
-            # packaged Electron app, Spotlight launch, etc.).
-            legacy_users = [
-                os.environ.get('USER'),       # whatever is set right now
-                os.environ.get('USERNAME'),   # Windows / weird envs
-                'default',                    # the historical fallback string
-                '',                            # USER explicitly empty
+            users = [
+                os.environ.get('USER'),
+                os.environ.get('USERNAME'),
+                'default',
+                '',
             ]
             try:
                 import pwd
-                legacy_users.append(pwd.getpwuid(os.getuid()).pw_name)
+                users.append(pwd.getpwuid(os.getuid()).pw_name)
             except Exception:
                 pass
-            for legacy_user in legacy_users:
-                if legacy_user is None:
+
+            # Hostnames the previous scheme may have used. Include current
+            # nodename plus common macOS variants so we can migrate any
+            # secure.enc written under the old `nodename_user` scheme.
+            try:
+                current_node = os.uname().nodename
+            except Exception:
+                current_node = ''
+            node_variants = {current_node}
+            for n in (current_node, current_node.split('.')[0]):
+                if n:
+                    node_variants.update({n, f"{n}.local", f"{n}.lan"})
+
+            for u in users:
+                if u is None:
                     continue
-                info = f"{os.uname().nodename}_{legacy_user}"
-                candidates.append(hashlib.sha256(info.encode()).hexdigest()[:16])
+                # New scheme: user only
+                candidates.append(hashlib.sha256(u.encode()).hexdigest()[:16])
+                # Old scheme: nodename_user
+                for node in node_variants:
+                    info = f"{node}_{u}"
+                    candidates.append(hashlib.sha256(info.encode()).hexdigest()[:16])
         except Exception:
             pass
         # Deduplicate while preserving order
@@ -190,7 +202,10 @@ class ConfigurationManager:
             decrypted_data = fernet.decrypt(encrypted_data)
             return json.loads(decrypted_data.decode())
         except Exception as primary_err:
-            logger.debug(f"Could not decrypt with current machine_id: {primary_err}")
+            logger.error(
+                f"❌ secure.enc decrypt failed with current machine_id "
+                f"({current_id[:8]}…): {primary_err}. Trying legacy IDs…"
+            )
 
         # Migration path: try each legacy ID
         for legacy_id in self._legacy_machine_ids():
@@ -216,6 +231,11 @@ class ConfigurationManager:
             except Exception:
                 continue
 
+        logger.error(
+            "❌ secure.enc could not be decrypted with any known machine_id — "
+            "API keys will appear empty until re-entered. "
+            f"current_id={current_id[:8]}…, legacy_ids_tried={len(self._legacy_machine_ids())}"
+        )
         return {}
     
     def _deep_merge(self, base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
