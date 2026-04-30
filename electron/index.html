@@ -65,7 +65,13 @@
                 </button>
             </div>
         </header>
-        
+
+        <div id="missingKeyBanner" class="missing-key-banner hidden" role="alert">
+            <i class="ph ph-warning missing-key-banner-icon"></i>
+            <span class="missing-key-banner-text" id="missingKeyBannerText">Add your API key to start transcribing</span>
+            <button class="missing-key-banner-action" id="missingKeyBannerAction">Open Settings</button>
+        </div>
+
         <main class="app-main">
             <!-- Agent Feed Panel (staging + active states) -->
             <div id="agentFeedPanel" class="agent-feed-panel hidden">

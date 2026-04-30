@@ -39,6 +39,8 @@ class FluidTranscriptionManager {
         // Callbacks
         this._onSegmentTranscribed = null;
         this.onSegment = null; // callback(text, segmentIndex)
+        this.onAuthError = null; // callback() — fired once on first 401/403
+        this._authFailed = false;
     }
 
     /**
@@ -229,6 +231,8 @@ class FluidTranscriptionManager {
      * Send current buffer as a WAV chunk to backend.
      */
     async _sendChunk() {
+        if (this._authFailed) return;
+
         // Minimum samples: at least 1 second of audio at source rate
         const minSamples = this.audioContext ? this.audioContext.sampleRate : 48000;
         if (this.sampleBuffer.length < minSamples) {
@@ -295,6 +299,14 @@ class FluidTranscriptionManager {
 
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({}));
+                    const isAuth = response.status === 401 || response.status === 403 ||
+                        NON_RETRYABLE.some(k => (errorData.error || '').toLowerCase().includes(k));
+                    if (isAuth && !this._authFailed) {
+                        this._authFailed = true;
+                        if (this.onAuthError) {
+                            try { this.onAuthError(); } catch (e) { console.error(e); }
+                        }
+                    }
                     throw new Error(errorData.error || `HTTP ${response.status}`);
                 }
 

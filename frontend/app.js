@@ -168,6 +168,14 @@ class VoiceToTextApp {
         this.shortcuts = new ShortcutManager(this.api);
         this.dictionary = new DictionaryManager(this.api);
         this.fluidTranscription = new FluidTranscriptionManager(this.api, this.backendUrl);
+        this.fluidTranscription.onAuthError = () => {
+            console.warn('🔑 Fluid auth error mid-recording — stopping');
+            this.refreshActiveEngineKeyState();
+            if (this.isRecording) {
+                this.showToast('Transcription stopped: API key invalid', 'error');
+                this.stopRecording();
+            }
+        };
         
         // Configure DictionaryManager elements (now that dictionary exists)
         this.dictionary.setElements(this.dictionaryContent, this.dictionaryEmpty);
@@ -493,6 +501,11 @@ class VoiceToTextApp {
         this.saveRecordShortcut = document.getElementById('saveRecordShortcut');
         this.currentRecordingShortcut = null; // Store current shortcut
         
+        // Missing-key showstopper banner
+        this.missingKeyBanner = document.getElementById('missingKeyBanner');
+        this.missingKeyBannerText = document.getElementById('missingKeyBannerText');
+        this.missingKeyBannerAction = document.getElementById('missingKeyBannerAction');
+
         // Verify critical elements
         if (!this.recordButton) console.error('❌ Record button not found');
         if (!this.transcriptionsContainer) console.error('❌ Transcriptions container not found');
@@ -867,7 +880,14 @@ class VoiceToTextApp {
 
         // ----- STT model selector -----
         if (this.sttModelSelect) {
-            this.sttModelSelect.addEventListener('change', () => this.setSttModel(this.sttModelSelect.value));
+            this.sttModelSelect.addEventListener('change', async () => {
+                await this.setSttModel(this.sttModelSelect.value);
+                await this.refreshActiveEngineKeyState();
+            });
+        }
+
+        if (this.missingKeyBannerAction) {
+            this.missingKeyBannerAction.addEventListener('click', () => this.openSettings());
         }
 
         // Alert Modal - OK button
@@ -1128,6 +1148,9 @@ class VoiceToTextApp {
                 
                 // Check API key status first
                 await this.checkApiKeyStatus();
+                await this.checkGeminiKeyStatus();
+                await this.refreshActiveEngineKeyState();
+                await this.refreshActiveEngineKeyState();
                 
                 // Load current shortcut and update display
                 await this.loadCurrentShortcut();
@@ -1202,9 +1225,9 @@ class VoiceToTextApp {
     }
 
     async _startRecordingInternal() {
-        // Check if API key is configured
-        if (!this.hasApiKey) {
-            this.showAlert('warning', 'API Key Required', 'Please add your OpenAI API Key in Settings before recording.');
+        const keyStatus = await this.refreshActiveEngineKeyState();
+        if (!keyStatus.ok) {
+            this.showToast(`Add your ${keyStatus.engineLabel} API key to start recording`, 'error');
             return;
         }
         
@@ -3674,6 +3697,7 @@ class VoiceToTextApp {
                 console.log('✅ API Key saved successfully', result);
                 this.closeApiKeyModal();
                 await this.checkApiKeyStatus();
+                await this.refreshActiveEngineKeyState();
                 
                 // Notify widget about API key change
                 if (window.electronAPI && window.electronAPI.syncRecordingState) {
@@ -3807,6 +3831,7 @@ class VoiceToTextApp {
                 console.log('✅ API Key removed successfully');
                 this.closeRemoveApiKeyModal();
                 await this.checkApiKeyStatus();
+                await this.refreshActiveEngineKeyState();
                 
                 // Notify widget about API key removal
                 if (window.electronAPI && window.electronAPI.syncRecordingState) {
@@ -3913,6 +3938,7 @@ class VoiceToTextApp {
             if (response.ok && result.success) {
                 this.closeGeminiKeyModal();
                 await this.checkGeminiKeyStatus();
+                await this.refreshActiveEngineKeyState();
                 this.showAlert('success', 'Success', 'Gemini API Key saved.');
             } else {
                 const details = result.validation?.details || result.error || 'Invalid Gemini key';
@@ -3945,6 +3971,7 @@ class VoiceToTextApp {
             if (response.ok) {
                 this.closeRemoveGeminiKeyModal();
                 await this.checkGeminiKeyStatus();
+                await this.refreshActiveEngineKeyState();
                 this.showToast('Gemini API Key removed', 'success');
             } else {
                 const result = await response.json();
@@ -3980,6 +4007,68 @@ class VoiceToTextApp {
         } catch (e) {
             console.error('❌ Error saving STT model setting:', e);
         }
+    }
+
+    async checkActiveEngineHasKey() {
+        const ENGINE_LABELS = {
+            'whisper': 'OpenAI',
+            'gemini-flash': 'Gemini',
+            'gemini-flash-lite': 'Gemini'
+        };
+        let engine = 'whisper';
+        try {
+            const r = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`);
+            if (r.ok) {
+                const d = await r.json();
+                engine = d.value || 'whisper';
+            }
+        } catch (e) { /* fall back to whisper */ }
+
+        const needsGemini = engine === 'gemini-flash' || engine === 'gemini-flash-lite';
+        const keyEndpoint = needsGemini ? '/api/config/gemini-key' : '/api/config/api-key';
+
+        let hasKey = false;
+        try {
+            const r = await fetch(`${this.backendUrl}${keyEndpoint}`);
+            if (r.ok) {
+                const d = await r.json();
+                hasKey = !!d.has_api_key;
+            }
+        } catch (e) { /* treat as missing */ }
+
+        return {
+            ok: hasKey,
+            missingKey: hasKey ? null : (needsGemini ? 'gemini' : 'openai'),
+            engineLabel: ENGINE_LABELS[engine] || 'OpenAI'
+        };
+    }
+
+    async refreshActiveEngineKeyState() {
+        const status = await this.checkActiveEngineHasKey();
+        this._activeEngineKeyOk = status.ok;
+        this._activeEngineMissingLabel = status.engineLabel;
+
+        if (this.missingKeyBanner) {
+            if (status.ok) {
+                this.missingKeyBanner.classList.add('hidden');
+            } else {
+                if (this.missingKeyBannerText) {
+                    this.missingKeyBannerText.textContent = `Add your ${status.engineLabel} API key to start transcribing`;
+                }
+                this.missingKeyBanner.classList.remove('hidden');
+            }
+        }
+
+        if (this.recordButton) {
+            if (status.ok) {
+                this.recordButton.classList.remove('key-missing');
+                this.recordButton.removeAttribute('title');
+            } else {
+                this.recordButton.classList.add('key-missing');
+                this.recordButton.setAttribute('title', `Add your ${status.engineLabel} API key`);
+            }
+        }
+        return status;
     }
 
     // Alert Modal Methods
@@ -4837,6 +4926,7 @@ class VoiceToTextApp {
                     // API key was added successfully, refresh status
                     console.log('🔑 API Key added, refreshing status...');
                     appInstance.checkApiKeyStatus();
+                    appInstance.refreshActiveEngineKeyState();
                 }
             });
         }

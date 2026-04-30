@@ -2956,3 +2956,43 @@
 /* Transform mode on app-container */
 .app-container.transform-mode .transcriptions-section { display: none; }
 .app-container.transform-mode .agent-feed-panel { display: none; }
+
+/* Missing API key showstopper banner */
+.missing-key-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 16px 0 16px;
+    padding: 10px 14px;
+    background: #fff8e1;
+    border: 1px solid #f5c84c;
+    border-radius: 8px;
+    color: #6b4f00;
+    font-size: 13px;
+    font-weight: 500;
+}
+.missing-key-banner.hidden { display: none; }
+.missing-key-banner-icon {
+    font-size: 18px;
+    color: #c98a00;
+    flex-shrink: 0;
+}
+.missing-key-banner-text { flex: 1; }
+.missing-key-banner-action {
+    background: #c98a00;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+.missing-key-banner-action:hover { background: #a87300; }
+
+.record-button-circular.key-missing {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}

@@ -1,5 +1,7 @@
 # 🚀 Stories App - Release Guide
 
+> **For the day-to-day build flow** (internal vs community flavors, version-claiming with `built/<version>` tags, distributing DMGs to the team), see [`../electron/build_docs/BUILD.md`](../electron/build_docs/BUILD.md). This guide focuses on the deeper "how signing and notarization work" details and troubleshooting.
+
 This guide shows you how to create a new version of Stories ready for distribution.
 
 ---
@@ -240,10 +242,9 @@ For public distribution you need the cert. See `docs/CODE_SIGNING.md`.
 
 ---
 
-## 📤 **PUBLISHING TO GITHUB RELEASES**
+## 📤 **PUBLISHING TO GITHUB RELEASES (official, signed community)**
 
-DMGs do **not** live in the git repo (`out/` is gitignored). To make a
-build downloadable, attach it to a GitHub Release:
+For an official public release built from `main` (signed + notarized), attach the DMG to a GitHub Release:
 
 ```bash
 gh release create v<version>-community --draft \
@@ -254,6 +255,8 @@ gh release create v<version>-community --draft \
 
 The Release is created as a draft so you can review before publishing.
 List existing releases with `gh release list`.
+
+For internal team-only distribution, see "Distributing a build to the team" near the top of this doc — that uses the `built/<version>` tag + prerelease pattern.
 
 ---
 
@@ -276,30 +279,6 @@ List existing releases with `gh release list`.
 - **The build prints "✅" but `out/make/` looks empty.** You're in
   the wrong working directory. The npm scripts use relative paths and
   `cd backend` mid-pipeline; always run them from the repo root.
-
----
-
-## 🤖 **FOR AI CODING AGENTS**
-
-Quick orientation if you've been dropped into this repo to build:
-
-- **One command to remember**: `npm run make:community`. It handles
-  Python venv install, PyInstaller bundle, electron-forge package, DMG
-  modification, and DMG signing (if cert is present).
-- **Three files for version bumps**: `package.json`, `CHANGELOG.md`,
-  `DMG_README.txt`. Mismatch = silent confusion for the user.
-- **Two files for new Python deps**: `backend/requirements.txt`
-  (always) and `backend/backend.spec` `hiddenimports` (if the import is
-  lazy/conditional).
-- **Never commit**: anything under `out/`, `dist/`, `backend/build/`,
-  or any `secure.enc` / `*.dmg` / `node_modules/`. Already gitignored.
-- **Never bypass build robustness**: don't disable `build:backend` to
-  go faster. The 90s it adds prevents the entire class of "stale
-  bundle" bugs we hit pre-0.9.10.
-- **Before reporting "build worked"**: actually open the resulting
-  `.dmg`, install it, and exercise the changed code path. The dev mode
-  (`npm start`) uses system Python and will not surface PyInstaller
-  bundling issues.
 
 ---
 
