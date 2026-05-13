@@ -1001,8 +1001,13 @@ function startBackendServer() {
     let backendCommand, backendArgs, projectRoot;
     
     if (app.isPackaged) {
-      // Production: Use standalone executable
-      backendCommand = path.join(process.resourcesPath, 'stories-backend');
+      // Production: Use standalone executable.
+      // Onedir layout (issue #33): the executable lives inside its own folder
+      // next to _internal/. Older onefile builds put the binary directly at
+      // Resources/stories-backend — we fall back to that path for safety.
+      const onedirExe = path.join(process.resourcesPath, 'stories-backend', 'stories-backend');
+      const onefileExe = path.join(process.resourcesPath, 'stories-backend');
+      backendCommand = require('fs').existsSync(onedirExe) ? onedirExe : onefileExe;
       backendArgs = [];
       projectRoot = process.resourcesPath;
     } else {

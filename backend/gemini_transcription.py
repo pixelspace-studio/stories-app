@@ -6,6 +6,7 @@ returning a RetryResult-compatible object so the existing app flow does not chan
 """
 
 import os
+import sys
 import logging
 import mimetypes
 from typing import Optional
@@ -13,6 +14,31 @@ from typing import Optional
 from retry_logic import RetryResult, RetryReason
 
 logger = logging.getLogger(__name__)
+
+
+def _log_pyinstaller_bundle_state(context: str) -> None:
+    """Dump sys._MEIPASS state so _MEI-cleanup failures are diagnosable.
+
+    See backend/app.py::log_pyinstaller_bundle_state for the full rationale.
+    """
+    try:
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass is None:
+            logger.info("🔍 [%s] not a PyInstaller bundle (no sys._MEIPASS)", context)
+            return
+        exists = os.path.isdir(meipass)
+        sample = []
+        if exists:
+            try:
+                sample = sorted(os.listdir(meipass))[:8]
+            except Exception as e:
+                sample = [f"<listdir failed: {e}>"]
+        logger.info(
+            "🔍 [%s] sys._MEIPASS=%s exists=%s sample=%s",
+            context, meipass, exists, sample,
+        )
+    except Exception as e:
+        logger.info("🔍 [%s] bundle-state probe failed: %s", context, e)
 
 
 # Gemini models exposed in the UI. Keep ordering aligned with frontend.
@@ -235,6 +261,10 @@ def transcribe_with_gemini(
             reason = RetryReason.UNKNOWN_ERROR
 
         logger.error(f"❌ Gemini transcription error ({reason.value}): {e}")
+        # If the failure looks filesystem-related, capture bundle state for
+        # post-mortem analysis (PyInstaller _MEI cleanup hypothesis, issue #33).
+        if isinstance(e, FileNotFoundError) or 'no such file' in lowered or 'errno 2' in lowered:
+            _log_pyinstaller_bundle_state("gemini-transcribe-failed")
         return RetryResult(
             success=False,
             data=None,

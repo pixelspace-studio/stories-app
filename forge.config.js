@@ -52,7 +52,12 @@ module.exports = {
     //   teamId: process.env.APPLE_TEAM_ID
     // },
     extraResource: [
-      './dist/stories-backend',  // Standalone executable
+      // PyInstaller onedir output: a directory `stories-backend/` containing
+      // the executable plus `_internal/` (libs and data files). Electron Forge
+      // copies it recursively into Contents/Resources/stories-backend/. See
+      // issue #33 — onefile previously extracted to /var/folders and macOS
+      // periodic cleaned the tree after ~3 days of uptime.
+      './dist/stories-backend',
       ...(process.platform === 'darwin' ? [
         './entitlements.mac.plist',
         './DMG_README.txt',        // Instructions for users
@@ -177,9 +182,13 @@ module.exports = {
         
         try {
           // Step 1: Re-sign backend with hardened runtime
+          // Onedir layout (issue #33): the backend lives at
+          //   Contents/Resources/stories-backend/stories-backend
+          // alongside _internal/ which holds all .dylib/.so/data files. The
+          // recursive pass in sign-all-binaries.sh handles _internal/ contents.
           console.log('\n📝 Step 1: Re-signing backend with hardened runtime...');
-          const backendPath = path.join(appPath, 'Contents/Resources/stories-backend');
-          
+          const backendPath = path.join(appPath, 'Contents/Resources/stories-backend/stories-backend');
+
           if (fs.existsSync(backendPath)) {
             execSync(
               `codesign --force --sign "${identity}" --options runtime --entitlements "${entitlements}" --timestamp "${backendPath}"`,

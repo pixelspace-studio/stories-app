@@ -77,20 +77,22 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# onedir build (COLLECT after EXE). Issue #33: the previous onefile mode
+# extracted bundled resources into /var/folders/.../T/_MEIxxxxx/ at every
+# launch; macOS's /etc/periodic/daily/110.clean-tmps deleted those files
+# after ~3 days of process uptime, causing FileNotFoundError on lazy-loaded
+# resources (certifi, httpx, google-genai protos). Shipping a directory
+# inside Stories.app/Contents/Resources/ keeps those files out of /var.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='stories-backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,  # No console window
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -99,5 +101,16 @@ exe = EXE(
     entitlements_file='../entitlements.mac.plist' if _signing_identity else None,
     # Note: PyInstaller's codesign doesn't support hardened runtime flag
     # Backend will be re-signed with hardened runtime in forge.config.js postPackage hook
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='stories-backend',
 )
 

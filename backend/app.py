@@ -337,16 +337,43 @@ init_database()
 openai_client = None
 _openai_client_initialized = False
 
+
+def log_pyinstaller_bundle_state(context: str) -> None:
+    """Log PyInstaller bundle state so we can diagnose _MEI-cleanup-style failures.
+
+    Background: when the backend is built as a PyInstaller onefile binary,
+    macOS may delete files inside _MEIxxxxxx after ~3 days of process uptime
+    (via /etc/periodic/daily/110.clean-tmps), leading to FileNotFoundError on
+    lazy-loaded resources (certifi, httpx, google-genai protos). This dump
+    captures the evidence the next time a transcription init fails.
+    """
+    try:
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass is None:
+            print(f"🔍 [{context}] not a PyInstaller bundle (no sys._MEIPASS)")
+            return
+        exists = os.path.isdir(meipass)
+        sample = []
+        if exists:
+            try:
+                sample = sorted(os.listdir(meipass))[:8]
+            except Exception as e:
+                sample = [f"<listdir failed: {e}>"]
+        print(f"🔍 [{context}] sys._MEIPASS={meipass} exists={exists} sample={sample}")
+    except Exception as e:
+        print(f"🔍 [{context}] bundle-state probe failed: {e}")
+
+
 def get_openai_client():
     """Get or initialize OpenAI client (lazy loading)"""
     global openai_client, _openai_client_initialized, API_AVAILABLE
-    
+
     if _openai_client_initialized:
         return openai_client
-    
+
     _openai_client_initialized = True
     api_key = get_api_key()
-    
+
     if api_key:
         try:
             from openai import OpenAI
@@ -360,10 +387,11 @@ def get_openai_client():
         except Exception as e:
             API_AVAILABLE = False
             print(f"⚠️  OpenAI initialization failed: {e}")
+            log_pyinstaller_bundle_state("openai-init-failed")
     else:
         API_AVAILABLE = False
         print("⚠️  No API Key configured")
-    
+
     return None
 
 # Check if API key is available at startup (but don't initialize client yet)

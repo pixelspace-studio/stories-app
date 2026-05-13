@@ -87,11 +87,25 @@ done
 echo "✅ Node modules signed"
 echo ""
 
+# Step 2.5: Sign all .so files (Python C-extensions inside PyInstaller _internal/)
+# Issue #33: onedir backend ships dozens of .so files (cryptography, grpc,
+# pydantic-core, etc.) that Apple rejects at notarization unless each is
+# individually signed with hardened runtime.
+echo "🐍 Step 2.5: Signing Python .so extensions..."
+find "$APP_PATH" -type f -name "*.so" | while read -r so_module; do
+    sign_file "$so_module" "no"
+done
+echo "✅ Python .so extensions signed"
+echo ""
+
 # Step 3: Sign specific executables with entitlements
 echo "⚙️  Step 3: Signing executables..."
 
-# Backend
-if [ -f "$APP_PATH/Contents/Resources/stories-backend" ]; then
+# Backend (onedir layout — executable sits inside its own folder next to _internal/)
+if [ -f "$APP_PATH/Contents/Resources/stories-backend/stories-backend" ]; then
+    sign_file "$APP_PATH/Contents/Resources/stories-backend/stories-backend" "yes"
+elif [ -f "$APP_PATH/Contents/Resources/stories-backend" ]; then
+    # Legacy onefile layout — safety net for any branch that hasn't migrated.
     sign_file "$APP_PATH/Contents/Resources/stories-backend" "yes"
 fi
 
