@@ -416,6 +416,7 @@ class VoiceToTextApp {
         this.instantRecordingToggle = document.getElementById('instantRecordingToggle');
         this.telemetryToggle = document.getElementById('telemetryToggle');
         this.fluidTranscriptionToggle = document.getElementById('fluidTranscriptionToggle');
+        this.microphoneSelect = document.getElementById('microphoneSelect');
         this.realtimeFeedSettingItem = document.getElementById('realtimeFeedSettingItem');
         this.realtimeFeedToggle = document.getElementById('realtimeFeedToggle');
         this.copyFeedPathButton = document.getElementById('copyFeedPathButton');
@@ -983,6 +984,13 @@ class VoiceToTextApp {
             });
         }
 
+        // Microphone select
+        if (this.microphoneSelect) {
+            this.microphoneSelect.addEventListener('change', () => {
+                this.updateMicrophoneSetting();
+            });
+        }
+
         // Real-time Feed toggle
         if (this.realtimeFeedToggle) {
             this.realtimeFeedToggle.addEventListener('change', () => {
@@ -1245,14 +1253,14 @@ class VoiceToTextApp {
             // STATE 1: Starting - show "starting" + timer at 00:00
             this.updateUIForStarting();
 
-            // Get media stream
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                } 
-            });
+            // Get media stream with preferred microphone
+            let audioConstraints;
+            try {
+                audioConstraints = await this.getPreferredAudioConstraints();
+            } catch {
+                audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+            }
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
             
             // Set up MediaRecorder
             this.mediaRecorder = new MediaRecorder(stream, {
@@ -2908,12 +2916,20 @@ class VoiceToTextApp {
         // Load real-time feed setting (depends on fluid state)
         await this.loadRealtimeFeedSetting();
 
+        // Load microphone setting and populate dropdown
+        await this.loadMicrophoneSetting();
+
         // Open with ModalManager
         this.modalManager.open('settings', { delay: 10 });
     }
 
     closeSettings() {
         console.log('⚙️ Closing settings panel');
+        // Remove device change listener when settings close
+        if (this._onDeviceChange) {
+            navigator.mediaDevices.removeEventListener('devicechange', this._onDeviceChange);
+            this._onDeviceChange = null;
+        }
         this.modalManager.close('settings');
     }
     
@@ -4492,6 +4508,96 @@ class VoiceToTextApp {
             // Default to enabled on error
             this.telemetryToggle.checked = true;
         }
+    }
+
+    // ====================================
+    // MICROPHONE SELECTION
+    // ====================================
+
+    async loadMicrophoneSetting() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioInputs = devices.filter(d => d.kind === 'audioinput');
+
+            const select = this.microphoneSelect;
+            select.innerHTML = '<option value="default">System Default</option>';
+
+            for (const device of audioInputs) {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Microphone (${device.deviceId.slice(0, 8)}...)`;
+                select.appendChild(option);
+            }
+
+            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
+            if (response.ok) {
+                const data = await response.json();
+                const savedDeviceId = data.value || 'default';
+                console.log('🎙️ Saved microphone preference:', savedDeviceId);
+
+                const deviceExists = savedDeviceId === 'default' || audioInputs.some(d => d.deviceId === savedDeviceId);
+                select.value = deviceExists ? savedDeviceId : 'default';
+
+                if (!deviceExists && savedDeviceId !== 'default') {
+                    console.log('🎙️ Saved microphone no longer available, resetting to default');
+                    this.updateMicrophoneSetting();
+                }
+            }
+
+            if (this._onDeviceChange) {
+                navigator.mediaDevices.removeEventListener('devicechange', this._onDeviceChange);
+            }
+            this._onDeviceChange = () => this.loadMicrophoneSetting();
+            navigator.mediaDevices.addEventListener('devicechange', this._onDeviceChange);
+
+        } catch (error) {
+            console.error('❌ Error loading microphone setting:', error);
+        }
+    }
+
+    async updateMicrophoneSetting() {
+        const selectedDeviceId = this.microphoneSelect.value;
+        console.log('🎙️ Updating microphone preference to:', selectedDeviceId);
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: selectedDeviceId })
+            });
+
+            if (response.ok) {
+                console.log('✅ Microphone preference saved');
+            } else {
+                console.error('❌ Failed to save microphone preference');
+            }
+        } catch (error) {
+            console.error('❌ Error saving microphone preference:', error);
+        }
+    }
+
+    async getPreferredAudioConstraints() {
+        const constraints = {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        };
+
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
+            if (response.ok) {
+                const data = await response.json();
+                const deviceId = data.value;
+                if (deviceId && deviceId !== 'default') {
+                    constraints.deviceId = { exact: deviceId };
+                    console.log('🎙️ Using preferred microphone:', deviceId);
+                }
+            }
+        } catch (error) {
+            console.log('🎙️ Could not load mic preference, using system default');
+        }
+
+        return constraints;
     }
 
     // ====================================

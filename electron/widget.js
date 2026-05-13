@@ -384,15 +384,29 @@ class WidgetApp {
             }
             
             console.log('🎛️ navigator.mediaDevices available');
-            
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+
+            // Build audio constraints with preferred microphone
+            const audioConstraints = {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true
+            };
+
+            try {
+                const micResponse = await fetch(`${this.backendUrl}/api/config/settings/audio_settings.preferred_microphone`);
+                if (micResponse.ok) {
+                    const micData = await micResponse.json();
+                    if (micData.value && micData.value !== 'default') {
+                        audioConstraints.deviceId = { exact: micData.value };
+                        console.log('🎙️ Widget using preferred microphone:', micData.value);
+                    }
                 }
-            });
+            } catch (e) {
+                console.log('🎙️ Could not load mic preference, using system default');
+            }
+
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
             
             console.log('🎛️ Microphone access granted!');
             console.log('🎛️ Stream:', stream);
