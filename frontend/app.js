@@ -419,6 +419,15 @@ class VoiceToTextApp {
         this.microphoneSelect = document.getElementById('microphoneSelect');
         this.realtimeFeedSettingItem = document.getElementById('realtimeFeedSettingItem');
         this.realtimeFeedToggle = document.getElementById('realtimeFeedToggle');
+        // Transcript suffix (append saved word/phrase to final transcripts)
+        this.transcriptSuffixToggle = document.getElementById('transcriptSuffixToggle');
+        this.transcriptSuffixControls = document.getElementById('transcriptSuffixControls');
+        this.transcriptSuffixSelect = document.getElementById('transcriptSuffixSelect');
+        this.transcriptSuffixInput = document.getElementById('transcriptSuffixInput');
+        this.transcriptSuffixAdd = document.getElementById('transcriptSuffixAdd');
+        this.transcriptSuffixDelete = document.getElementById('transcriptSuffixDelete');
+        // In-memory source of truth for the suffix setting object
+        this.transcriptSuffixState = { enabled: false, active_id: null, items: [] };
         this.copyFeedPathButton = document.getElementById('copyFeedPathButton');
         this.privacyPolicyLink = document.getElementById('privacyPolicyLink');
         
@@ -995,6 +1004,28 @@ class VoiceToTextApp {
         if (this.realtimeFeedToggle) {
             this.realtimeFeedToggle.addEventListener('change', () => {
                 this.toggleRealtimeFeed();
+            });
+        }
+
+        // Transcript suffix controls
+        if (this.transcriptSuffixToggle) {
+            this.transcriptSuffixToggle.addEventListener('change', () => {
+                this.toggleTranscriptSuffix();
+            });
+        }
+        if (this.transcriptSuffixSelect) {
+            this.transcriptSuffixSelect.addEventListener('change', () => {
+                this.selectTranscriptSuffix();
+            });
+        }
+        if (this.transcriptSuffixAdd) {
+            this.transcriptSuffixAdd.addEventListener('click', () => {
+                this.addTranscriptSuffix();
+            });
+        }
+        if (this.transcriptSuffixDelete) {
+            this.transcriptSuffixDelete.addEventListener('click', () => {
+                this.deleteTranscriptSuffix();
             });
         }
 
@@ -2916,6 +2947,9 @@ class VoiceToTextApp {
         // Load real-time feed setting (depends on fluid state)
         await this.loadRealtimeFeedSetting();
 
+        // Load transcript suffix setting (toggle + saved items)
+        await this.loadTranscriptSuffixSetting();
+
         // Load microphone setting and populate dropdown
         await this.loadMicrophoneSetting();
 
@@ -4299,6 +4333,143 @@ class VoiceToTextApp {
             // Revert toggle on error
             this.autoPasteToggle.checked = !isEnabled;
         }
+    }
+
+    // ============================================================
+    // Transcript Suffix — append a saved word/phrase to final transcripts.
+    // The whole object is written back on every mutation; a local in-memory
+    // copy (this.transcriptSuffixState) is the source of truth for the UI,
+    // reverted on any failed PUT (mirrors the revert-on-error toggles above).
+    // ============================================================
+
+    // Load transcript suffix setting (toggle + saved items) at startup.
+    async loadTranscriptSuffixSetting() {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.transcript_suffix`);
+            if (response.ok) {
+                const data = await response.json();
+                const cfg = data.value;
+                if (cfg && typeof cfg === 'object') {
+                    this.transcriptSuffixState = {
+                        enabled: !!cfg.enabled,
+                        active_id: cfg.active_id || null,
+                        items: Array.isArray(cfg.items) ? cfg.items : []
+                    };
+                } else {
+                    this.transcriptSuffixState = { enabled: false, active_id: null, items: [] };
+                }
+                console.log('🏷️ Current transcript suffix setting:', this.transcriptSuffixState);
+            }
+        } catch (error) {
+            console.error('❌ Error loading transcript suffix setting:', error);
+            this.transcriptSuffixState = { enabled: false, active_id: null, items: [] };
+        }
+        this.renderTranscriptSuffixUI();
+    }
+
+    // Reflect the in-memory state onto the toggle, controls visibility, and dropdown.
+    renderTranscriptSuffixUI() {
+        const state = this.transcriptSuffixState;
+        if (this.transcriptSuffixToggle) {
+            this.transcriptSuffixToggle.checked = !!state.enabled;
+        }
+        if (this.transcriptSuffixControls) {
+            this.transcriptSuffixControls.classList.toggle('hidden', !state.enabled);
+        }
+        if (this.transcriptSuffixSelect) {
+            this.transcriptSuffixSelect.innerHTML = '';
+            if (!state.items.length) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No suffixes saved';
+                opt.disabled = true;
+                opt.selected = true;
+                this.transcriptSuffixSelect.appendChild(opt);
+            } else {
+                state.items.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.id;
+                    opt.textContent = item.text;
+                    if (item.id === state.active_id) opt.selected = true;
+                    this.transcriptSuffixSelect.appendChild(opt);
+                });
+            }
+        }
+    }
+
+    // Write the whole object back; revert local state + UI if the PUT fails.
+    async persistTranscriptSuffixState(previousState) {
+        try {
+            const response = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.transcript_suffix`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: this.transcriptSuffixState })
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            console.log('✅ Transcript suffix setting updated');
+            return true;
+        } catch (error) {
+            console.error('❌ Error saving transcript suffix setting:', error);
+            // Revert to the pre-mutation snapshot
+            this.transcriptSuffixState = previousState;
+            this.renderTranscriptSuffixUI();
+            return false;
+        }
+    }
+
+    async toggleTranscriptSuffix() {
+        const previousState = JSON.parse(JSON.stringify(this.transcriptSuffixState));
+        const isEnabled = this.transcriptSuffixToggle.checked;
+        console.log('🏷️ Transcript suffix:', isEnabled ? 'Enabled' : 'Disabled');
+        this.transcriptSuffixState.enabled = isEnabled;
+        this.renderTranscriptSuffixUI();
+        const ok = await this.persistTranscriptSuffixState(previousState);
+        if (ok) {
+            await this.telemetry.track('feature_toggled', {
+                feature: 'transcript_suffix',
+                enabled: isEnabled,
+                platform: await this.getPlatform()
+            });
+        }
+    }
+
+    async selectTranscriptSuffix() {
+        const previousState = JSON.parse(JSON.stringify(this.transcriptSuffixState));
+        this.transcriptSuffixState.active_id = this.transcriptSuffixSelect.value || null;
+        await this.persistTranscriptSuffixState(previousState);
+    }
+
+    async addTranscriptSuffix() {
+        const text = (this.transcriptSuffixInput.value || '').trim();
+        if (!text) return; // ignore empty input
+        const previousState = JSON.parse(JSON.stringify(this.transcriptSuffixState));
+        const id = 'sfx_' + Date.now();
+        this.transcriptSuffixState.items.push({ id, text });
+        this.transcriptSuffixState.active_id = id; // newly added becomes active
+        this.transcriptSuffixInput.value = '';
+        this.renderTranscriptSuffixUI();
+        await this.persistTranscriptSuffixState(previousState);
+    }
+
+    async deleteTranscriptSuffix() {
+        const selectedId = this.transcriptSuffixSelect.value || this.transcriptSuffixState.active_id;
+        if (!selectedId) return;
+        const previousState = JSON.parse(JSON.stringify(this.transcriptSuffixState));
+        this.transcriptSuffixState.items = this.transcriptSuffixState.items.filter(i => i.id !== selectedId);
+        // If the active item was removed, fall back to the first remaining item or null
+        if (this.transcriptSuffixState.active_id === selectedId) {
+            this.transcriptSuffixState.active_id = this.transcriptSuffixState.items.length
+                ? this.transcriptSuffixState.items[0].id
+                : null;
+        }
+        // Empty list → also disable the feature and flip the toggle off
+        if (!this.transcriptSuffixState.items.length) {
+            this.transcriptSuffixState.enabled = false;
+        }
+        this.renderTranscriptSuffixUI();
+        await this.persistTranscriptSuffixState(previousState);
     }
 
     // Instant Recording Toggle Method

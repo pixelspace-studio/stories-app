@@ -119,7 +119,7 @@ def append_session_end_async(session_id, total_segments, total_duration):
 
 
 def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_transcription_fn, DATABASE_PATH,
-                          transcribe_chunk_fn=None, stt_credentials_check=None):
+                          transcribe_chunk_fn=None, stt_credentials_check=None, apply_suffix_fn=None):
     """
     Register fluid transcription routes on the Flask app.
 
@@ -134,6 +134,9 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
             When provided, used instead of calling Whisper directly so the active
             STT engine selected in settings drives chunk transcription.
         stt_credentials_check: optional callable returning (ok, error_msg) for the active engine
+        apply_suffix_fn: optional callable (text -> text) that appends the active
+            transcript suffix to the FINAL assembled text. Applied only in
+            fluid_complete, never to individual chunks.
     """
 
     @app.route('/api/transcribe/chunk', methods=['POST'])
@@ -297,6 +300,11 @@ def register_fluid_routes(app, get_openai_client, generate_whisper_prompt, save_
             clean_text = re.sub(r'<seg[^>]*>', '', clean_text)
             clean_text = re.sub(r'</seg>', ' ', clean_text)
             clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+            # Append the active transcript suffix to the final assembled text
+            # (never to individual chunks — those go through /api/transcribe/chunk).
+            if apply_suffix_fn is not None:
+                clean_text = apply_suffix_fn(clean_text)
 
             # Look up active STT model so we can label this transcription
             stt_model_setting = get_default_config_manager().get_setting('ui_settings.stt_model', 'whisper') or 'whisper'

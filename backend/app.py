@@ -227,6 +227,38 @@ def generate_whisper_prompt_from_dictionary() -> str:
         print(f"⚠️  Failed to generate Whisper prompt: {e}")
         return None
 
+def apply_transcript_suffix(text: str) -> str:
+    """
+    Append the active user-defined suffix to a FINAL transcript.
+
+    Controlled by ui_settings.transcript_suffix:
+      { enabled: bool, active_id: str|null, items: [{id, text}] }
+
+    Never raises — on any config problem, returns text unchanged.
+    Must only be called on final assembled transcripts, never on
+    individual fluid chunks.
+    """
+    try:
+        cfg = get_default_config_manager().get_setting(
+            'ui_settings.transcript_suffix', None
+        )
+        if not cfg or not cfg.get('enabled'):
+            return text
+        active_id = cfg.get('active_id')
+        if not active_id:
+            return text
+        suffix = next(
+            (i.get('text', '').strip()
+             for i in cfg.get('items', []) if i.get('id') == active_id),
+            ''
+        )
+        if not suffix or not text.strip():
+            return text
+        return f"{text.rstrip()} {suffix}"
+    except Exception as e:
+        logger.warning(f"⚠️ Transcript suffix skipped: {e}")
+        return text
+
 app = Flask(__name__)
 CORS(app, origins=["*"], allow_headers=["*"], methods=["*"])  # Enable CORS for all origins
 
@@ -746,7 +778,13 @@ def transcribe_audio():
                 except Exception as dict_error:
                     print(f"Warning: Failed to apply dictionary corrections: {dict_error}")
                     # Continue with original text if dictionary fails
-                
+
+                # Append the active transcript suffix (after dictionary corrections,
+                # before save + auto-paste + response) so it propagates everywhere.
+                transcription_data['text'] = apply_transcript_suffix(
+                    transcription_data.get('text', '')
+                )
+
                 # Skip saving if ephemeral (e.g., instruction mode for custom transforms)
                 ephemeral = request.form.get('ephemeral', 'false').lower() == 'true'
                 if not ephemeral:
@@ -1252,7 +1290,13 @@ def retry_transcription():
                 # Save transcription to database and get ID
                 transcription_data = retry_result.data
                 transcription_id = None
-                
+
+                # Append the active transcript suffix to the fresh retry result
+                # (retries start from raw audio, so there is no double-append risk).
+                transcription_data['text'] = apply_transcript_suffix(
+                    transcription_data.get('text', '')
+                )
+
                 try:
                     transcription_id = save_transcription(transcription_data)
                     print(f"📝 Manual retry transcription saved with ID: {transcription_id}")
@@ -1384,6 +1428,13 @@ def retry_audio_transcription(audio_id):
         if retry_result.success:
             # Update existing transcription with success
             transcription_data = retry_result.data
+
+            # Append the active transcript suffix to the fresh retry result
+            # (retries start from raw audio, so there is no double-append risk).
+            transcription_data['text'] = apply_transcript_suffix(
+                transcription_data.get('text', '')
+            )
+
             update_success = update_transcription(
                 transcription_id=transcription_id,
                 data=transcription_data,
@@ -3123,6 +3174,7 @@ register_fluid_routes(
     DATABASE_PATH=DATABASE_PATH,
     transcribe_chunk_fn=run_transcription,
     stt_credentials_check=stt_credentials_ok,
+    apply_suffix_fn=apply_transcript_suffix,
 )
 
 if __name__ == '__main__':
