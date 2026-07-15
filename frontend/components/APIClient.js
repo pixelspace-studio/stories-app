@@ -138,6 +138,40 @@ class APIClient {
         }
     }
     
+    async importTranscribe(formData) {
+        // Duration is unknown before upload, and the request covers upload +
+        // ffmpeg conversion + STT of potentially ~an hour of audio, so use a
+        // generous fixed timeout (15 minutes).
+        const timeoutMs = 15 * 60 * 1000;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.error('❌ Import timeout reached, aborting request');
+            controller.abort();
+        }, timeoutMs);
+
+        try {
+            const result = await this.request('/api/import/transcribe', {
+                method: 'POST',
+                body: formData,
+                headers: {}, // Let browser set Content-Type for FormData
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+            return result;
+
+        } catch (error) {
+            clearTimeout(timeoutId);
+
+            if (error.name === 'AbortError') {
+                throw new Error('Import is taking longer than expected. Please try a shorter file.');
+            }
+
+            throw error;
+        }
+    }
+
     async getHistory() {
         return this.request('/api/history');
     }

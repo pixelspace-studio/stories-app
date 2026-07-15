@@ -1,5 +1,12 @@
 // Voice to Text App V2 - Frontend JavaScript
 
+// Allowed media-import extensions. Keep in sync with IMPORT_ALLOWED_EXTENSIONS
+// (backend/app.py) and the accept="" list on #importFileInput.
+const IMPORT_ALLOWED_EXTENSIONS = [
+    '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.wma',
+    '.mp4', '.mov', '.mkv', '.avi', '.m4v'
+];
+
 /**
  * Improves generic frontend error messages to be more user-friendly
  * Only applies to errors NOT from backend (backend errors are already user-friendly)
@@ -379,6 +386,10 @@ class VoiceToTextApp {
         this.shortcutsButton = document.getElementById('shortcutsButton');
         this.dictionaryButton = document.getElementById('dictionaryButton');
         this.settingsButton = document.getElementById('settingsButton');
+
+        // Media import (header button + hidden file input)
+        this.importFileButton = document.getElementById('importFileButton');
+        this.importFileInput = document.getElementById('importFileInput');
         
         // Settings Panel
         this.settingsOverlay = document.getElementById('settingsOverlay');
@@ -624,7 +635,25 @@ class VoiceToTextApp {
                 this.openDictionary();
             });
         }
-        
+
+        // Media import — header button opens the hidden native file picker
+        if (this.importFileButton && this.importFileInput) {
+            this.importFileButton.addEventListener('click', () => {
+                this.importFileInput.click();
+            });
+            this.importFileInput.addEventListener('change', (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (file) {
+                    this.importMediaFile(file);
+                }
+                // Reset so picking the same file again re-fires 'change'
+                e.target.value = '';
+            });
+        }
+
+        // Media import — drag & drop onto the main window
+        this.setupImportDragAndDrop();
+
         // Dictionary overlay - close when clicking outside panel
         if (this.dictionaryOverlay) {
             this.dictionaryOverlay.addEventListener('click', (e) => {
@@ -2058,6 +2087,8 @@ class VoiceToTextApp {
         const sourceType = transcription.source_type || 'standard';
         const canTransform = !isError && sourceType !== 'realtime';
         const sttModelTag = transcription.stt_model ? `<span class="stt-model-tag">(${this.escapeHtml(transcription.stt_model)})</span>` : '';
+        // Imported files get a small marker beside the timestamp
+        const importedIcon = sourceType === 'imported' ? '<i class="ph ph-file-arrow-up transcription-source-icon" title="Imported file"></i>' : '';
 
         // For error cards with audio_id, show retry button instead of copy
         // For error cards without audio_id, show neither copy nor retry
@@ -2105,7 +2136,7 @@ class VoiceToTextApp {
 
         card.innerHTML = `
             <div class="transcription-header">
-                <span class="transcription-timestamp">${errorIcon}${timestamp} ${sttModelTag}${transformLabel}${sourceLabel}</span>
+                <span class="transcription-timestamp">${errorIcon}${importedIcon}${timestamp} ${sttModelTag}${transformLabel}${sourceLabel}</span>
                 <div class="transcription-actions">
                     ${transformButton}
                     ${primaryButton}
@@ -2595,6 +2626,113 @@ class VoiceToTextApp {
     }
 
     // STATE 4: Transcribing (timer + texto, sin ondas, sin cancel)
+    /**
+     * Wire drag & drop of a media file onto the main window.
+     * Shows a subtle boxless drop affordance while dragging, and funnels the
+     * dropped file into importMediaFile(). Single file only in v1.
+     */
+    setupImportDragAndDrop() {
+        const container = document.getElementById('appContainer');
+        if (!container) return;
+
+        // dragenter/dragleave fire per descendant element, so count depth to
+        // avoid flicker and only clear the affordance when the drag truly leaves.
+        let dragDepth = 0;
+        const setDragging = (on) => container.classList.toggle('import-dragging', on);
+        const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+
+        container.addEventListener('dragenter', (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth++;
+            setDragging(true);
+        });
+        container.addEventListener('dragover', (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        });
+        container.addEventListener('dragleave', (e) => {
+            if (!hasFiles(e)) return;
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (dragDepth === 0) setDragging(false);
+        });
+        container.addEventListener('drop', (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth = 0;
+            setDragging(false);
+            const files = e.dataTransfer.files;
+            if (!files || files.length === 0) return;
+            if (files.length > 1) {
+                // v1: single file only — take the first.
+                this.showToast('One file at a time.', 'error');
+            }
+            this.importMediaFile(files[0]);
+        });
+    }
+
+    /**
+     * Import an existing audio/video file and transcribe it through the same
+     * engine pipeline used for live recordings. No auto-paste for imports —
+     * the result lands in history (see SPEC-MEDIA-FILE-IMPORT §3).
+     */
+    async importMediaFile(file) {
+        if (this.isRecording) {
+            this.showToast('Stop the current recording before importing a file.', 'error');
+            return;
+        }
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        // Keep this list in sync with IMPORT_ALLOWED_EXTENSIONS (backend)
+        if (!IMPORT_ALLOWED_EXTENSIONS.includes(ext)) {
+            this.showToast(`Unsupported file type: ${ext}`, 'error');
+            return;
+        }
+
+        const sizeMb = file.size ? +(file.size / 1024 / 1024).toFixed(2) : 0;
+        let success = false;
+        let durationSeconds = 0;
+
+        this.updateUIForTranscribing();          // reuse existing state
+        if (window.electronAPI && window.electronAPI.syncRecordingState) {
+            window.electronAPI.syncRecordingState('main_transcribing');
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            const result = await this.api.importTranscribe(formData);
+
+            if (result && result.text) {
+                success = true;
+                durationSeconds = result.duration_seconds || result.duration || 0;
+                if (window.soundManager) soundManager.playTranscriptionReady();
+                await this.loadTranscriptionHistory();
+                this.showToast('File transcribed.', 'success');
+                // Deliberate: no attemptAutoPaste() for imports (see spec §3)
+            } else {
+                throw new Error((result && result.error) || 'Import failed');
+            }
+        } catch (error) {
+            this.showToast(error.message || 'Import failed', 'error');
+        } finally {
+            this.updateUIForIdle();
+            if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                window.electronAPI.syncRecordingState('main_transcription_completed');
+            }
+            try {
+                await this.telemetry.track('file_imported', {
+                    extension: ext,
+                    size_mb: sizeMb,
+                    duration_seconds: durationSeconds,
+                    success: success
+                });
+            } catch (telemetryError) {
+                console.warn('Telemetry track failed for file_imported:', telemetryError);
+            }
+        }
+    }
+
     updateUIForTranscribing() {
         this.recordButton.classList.remove('recording');
         this.recordButton.classList.add('transcribing');

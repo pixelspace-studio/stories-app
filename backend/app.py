@@ -10,6 +10,8 @@ import time
 
 VERSION = "0.9.8"
 import tempfile
+import subprocess
+import shutil
 import sqlite3
 import json
 from datetime import datetime, timezone
@@ -1024,6 +1026,400 @@ def transcribe_audio():
             "transcription_id": transcription_id,
             "can_download": bool(audio_id)
         }), 500
+
+
+# ============================================================================
+# MEDIA FILE IMPORT (transcribe existing audio/video files)
+# ============================================================================
+
+# Allowed input containers. `.webm` appears once — it can carry audio-only or
+# audio+video; ffmpeg with -vn handles both identically, so no special-casing.
+IMPORT_AUDIO_EXTENSIONS = {'.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.wma'}
+IMPORT_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.mkv', '.avi', '.m4v'}
+IMPORT_ALLOWED_EXTENSIONS = IMPORT_AUDIO_EXTENSIONS | IMPORT_VIDEO_EXTENSIONS
+IMPORT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB — videos are big; audio is extracted anyway
+
+# Post-conversion ceilings for the converted MP3 (engine request limits).
+GEMINI_INLINE_CEILING = 19 * 1024 * 1024   # keep margin under the ~20 MB inline request cap
+WHISPER_FILE_CEILING = 25 * 1024 * 1024
+
+# Below this, the converted MP3 is treated as "no audio" (e.g. a silent video).
+IMPORT_MIN_AUDIO_BYTES = 128
+
+
+def ffmpeg_available() -> bool:
+    """True if a system ffmpeg binary is on PATH."""
+    return shutil.which('ffmpeg') is not None
+
+
+def extract_voice_audio(input_path: str, output_path: str, timeout: int = 600) -> None:
+    """
+    Normalize any audio/video input to STT-ready audio:
+    drop video stream, downmix to mono, resample to 16 kHz, MP3 48 kbps.
+    Raises subprocess.CalledProcessError / TimeoutExpired on failure.
+    """
+    cmd = [
+        'ffmpeg', '-y',
+        '-i', input_path,
+        '-vn',                    # ignore/discard video stream
+        '-ac', '1',               # mono
+        '-ar', '16000',           # 16 kHz — matches fluid-mode precedent
+        '-c:a', 'libmp3lame',
+        '-b:a', '48k',
+        output_path,
+    ]
+    subprocess.run(cmd, capture_output=True, timeout=timeout, check=True)
+
+
+@app.route('/api/import/transcribe', methods=['POST'])
+def import_and_transcribe():
+    """
+    Transcribe an existing audio/video file uploaded by the user.
+    Expected: multipart/form-data with 'file'.
+    Returns: same JSON shape as /api/transcribe (text, language, duration,
+             stt_model, cost fields, transcription_id, audio_id, notification).
+
+    Unlike /api/transcribe this path has no recording session, so it never
+    touches window_manager. It always normalizes the input through ffmpeg
+    (16 kHz mono MP3) before dispatching to the shared run_transcription()
+    engine (Whisper/Gemini with auto-fallback). No auto-paste for imports.
+    """
+    logger.info("\n" + "="*80)
+    logger.info("📥  MEDIA IMPORT REQUEST RECEIVED")
+    logger.info("="*80)
+
+    temp_upload_path = None
+    converted_path = None
+
+    try:
+        # CRITICAL: re-check credentials dynamically for the active STT engine.
+        global API_AVAILABLE
+        creds_ok, creds_error = stt_credentials_ok()
+        API_AVAILABLE = creds_ok
+        active_model = get_stt_model()
+        logger.info(f"🔑 STT Engine: {active_model} — {'✅ Ready' if creds_ok else '❌ Missing key'}")
+        if not creds_ok:
+            return jsonify({"error": creds_error, "details": creds_error}), 503
+
+        # Validate: file present
+        logger.info(f"📦 Checking file in request... Files: {list(request.files.keys())}")
+        if 'file' not in request.files:
+            logger.error("❌ ERROR: No file in request")
+            return jsonify({"error": "No file provided"}), 400
+        upload = request.files['file']
+        if not upload.filename:
+            logger.error("❌ ERROR: Empty filename")
+            return jsonify({"error": "No file selected"}), 400
+
+        # Validate: extension. Only trust the werkzeug filename for its extension,
+        # never for building a path (edge case: spaces/unicode/emoji filenames).
+        original_filename = upload.filename
+        ext = os.path.splitext(original_filename)[1].lower()
+        logger.info(f"📄 Import file: {original_filename} (ext: {ext or '<none>'})")
+        if ext not in IMPORT_ALLOWED_EXTENSIONS:
+            allowed = ', '.join(sorted(IMPORT_ALLOWED_EXTENSIONS))
+            return jsonify({
+                "error": f"Unsupported file type: {ext or 'unknown'}. Allowed: {allowed}"
+            }), 415
+
+        # Validate: upload size ceiling
+        if request.content_length and request.content_length > IMPORT_MAX_UPLOAD_BYTES:
+            limit_gb = IMPORT_MAX_UPLOAD_BYTES / (1024 ** 3)
+            logger.error(f"❌ Upload {request.content_length} bytes exceeds {IMPORT_MAX_UPLOAD_BYTES}")
+            return jsonify({
+                "error": f"File is too large. Maximum upload size is {limit_gb:.0f} GB."
+            }), 413
+
+        # ffmpeg is a hard requirement for this feature (not for the rest of the app).
+        if not ffmpeg_available():
+            logger.error("❌ ffmpeg not found on PATH — import requires it")
+            return jsonify({
+                "error": "FFmpeg is required to import files. Install it with: brew install ffmpeg"
+            }), 503
+
+        # Save upload to a temp file, preserving the real extension so ffmpeg
+        # picks the correct demuxer.
+        logger.info("💾 Saving upload to temporary file...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_in:
+            upload.save(tmp_in.name)
+            temp_upload_path = tmp_in.name
+        logger.info(f"✅ Upload saved: {temp_upload_path} ({os.path.getsize(temp_upload_path)} bytes)")
+
+        # Reserve the converted MP3 temp path.
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_out:
+            converted_path = tmp_out.name
+
+        # Step 1/5: Normalize audio via ffmpeg (16 kHz mono MP3 48 kbps, -vn).
+        logger.info("📍 Step 1/5: Normalize audio via ffmpeg (16 kHz mono MP3 48 kbps, -vn)")
+        step_start = time.time()
+        try:
+            extract_voice_audio(temp_upload_path, converted_path)
+        except subprocess.TimeoutExpired:
+            logger.error("❌ ffmpeg conversion timed out")
+            return jsonify({
+                "error": "Could not read audio from this file. The conversion timed out."
+            }), 422
+        except subprocess.CalledProcessError as e:
+            stderr_tail = ''
+            if e.stderr:
+                try:
+                    stderr_tail = e.stderr.decode('utf-8', errors='replace')[-500:]
+                except Exception:
+                    stderr_tail = str(e.stderr)[-500:]
+            logger.error(f"❌ ffmpeg failed (rc={e.returncode}). stderr tail:\n{stderr_tail}")
+            lowered = stderr_tail.lower()
+            if ('does not contain any stream' in lowered
+                    or 'output file is empty' in lowered
+                    or 'no audio' in lowered):
+                return jsonify({"error": "No audio track found in this file."}), 422
+            return jsonify({
+                "error": "Could not read audio from this file. The file may be corrupted or DRM-protected."
+            }), 422
+        finally:
+            # Free the raw upload immediately — videos can be huge; don't hold both.
+            if temp_upload_path and os.path.exists(temp_upload_path):
+                try:
+                    os.unlink(temp_upload_path)
+                    logger.info("🧹 Deleted raw upload temp file after conversion")
+                except Exception as del_err:
+                    logger.warning(f"⚠️ Could not delete raw upload temp file: {del_err}")
+                temp_upload_path = None
+
+        step_elapsed = time.time() - step_start
+        # Edge case: silent video / no audio track → empty or near-empty output.
+        if not os.path.exists(converted_path) or os.path.getsize(converted_path) < IMPORT_MIN_AUDIO_BYTES:
+            logger.error("❌ Converted audio is empty — likely no audio track")
+            return jsonify({"error": "No audio track found in this file."}), 422
+        converted_size = os.path.getsize(converted_path)
+        logger.info(f"✅ Step 1/5: Converted in {step_elapsed:.2f}s ({converted_size / 1024:.1f} KB)")
+
+        # Step 2/5: Detect duration (drives the "too long" message + STT timeout).
+        logger.info("📍 Step 2/5: Detect audio duration")
+        step_start = time.time()
+        audio_duration = get_audio_duration(converted_path)
+        step_elapsed = time.time() - step_start
+        if audio_duration:
+            logger.info(f"✅ Step 2/5: Completed in {step_elapsed:.2f}s (duration: {audio_duration:.1f}s)")
+        else:
+            logger.warning(f"⚠️ Step 2/5: Could not detect duration after {step_elapsed:.2f}s")
+
+        # Step 3/5: Post-conversion size guard. We use the ceiling of the
+        # currently selected engine. The STT fallback could switch engines
+        # mid-request, but we deliberately do NOT force the smaller (Gemini)
+        # ceiling here: rejecting Whisper-sized files that Whisper accepts would
+        # be worse than the rare fallback overshoot (which the engine surfaces
+        # as its own error). No STT call is made if we bail here — no wasted cost.
+        logger.info("📍 Step 3/5: Post-conversion size guard")
+        ceiling = GEMINI_INLINE_CEILING if active_model in GEMINI_MODELS else WHISPER_FILE_CEILING
+        if converted_size > ceiling:
+            minutes = int(round(audio_duration / 60)) if audio_duration else None
+            if minutes:
+                msg = (f"This file is too long (~{minutes} minutes of audio). "
+                       f"Maximum is about 50–65 minutes.")
+            else:
+                msg = "This file is too long. Maximum is about 50–65 minutes of audio."
+            logger.error(f"❌ Converted audio {converted_size / 1024 / 1024:.1f} MB exceeds "
+                         f"ceiling {ceiling / 1024 / 1024:.1f} MB — no STT call made")
+            return jsonify({"error": msg}), 413
+
+        # Step 4/5: Generate dictionary prompt
+        logger.info("📍 Step 4/5: Generate dictionary prompt")
+        whisper_prompt = generate_whisper_prompt_from_dictionary()
+
+        # Step 5/5: Transcribe via selected STT engine (with auto-fallback).
+        logger.info(f"📍 Step 5/5: Transcription via '{active_model}' (max attempts: 3)")
+        step_start = time.time()
+        retry_result = run_transcription(
+            audio_file_path=converted_path,
+            prompt=whisper_prompt,
+            audio_duration=audio_duration,
+            max_attempts=3,
+        )
+        step_elapsed = time.time() - step_start
+        if retry_result.success:
+            logger.info(f"✅ Step 5/5: Completed in {step_elapsed:.2f}s (attempts: {retry_result.attempts})")
+        else:
+            logger.error(f"❌ Step 5/5: Failed after {step_elapsed:.2f}s (attempts: {retry_result.attempts})")
+
+        config_manager = get_default_config_manager()
+        save_audio = config_manager.get_setting('audio_settings.save_audio_files', True)
+
+        if retry_result.success:
+            transcription_data = retry_result.data
+
+            # Apply custom dictionary corrections as a fallback (Whisper may have
+            # ignored some terms from the prompt).
+            try:
+                original_text = transcription_data.get('text', '')
+                dictionary = get_default_dictionary_manager()
+                corrected_text = dictionary.apply_corrections(original_text)
+                if corrected_text != original_text:
+                    logger.info("📖 Dictionary fallback corrections applied")
+                    transcription_data['text'] = corrected_text
+            except Exception as dict_error:
+                logger.warning(f"⚠️ Failed to apply dictionary corrections: {dict_error}")
+
+            # Feature 1: append the active transcript suffix (uniform pipeline —
+            # imports get the suffix too), after dictionary corrections and
+            # before save + response.
+            transcription_data['text'] = apply_transcript_suffix(
+                transcription_data.get('text', '')
+            )
+
+            # Save the converted MP3 if enabled (never the original file on disk).
+            audio_id = None
+            saved_audio_path = None
+            if save_audio:
+                try:
+                    audio_metadata = {
+                        'original_filename': original_filename,
+                        'import_source': True,
+                        'upload_timestamp': datetime.now().isoformat(),
+                        'status': 'transcribed',
+                    }
+                    audio_id, saved_audio_path = save_temp_audio_with_metadata_safe(
+                        temp_path=converted_path,
+                        metadata=audio_metadata,
+                        is_failed=False,
+                        timeout=15
+                    )
+                    if audio_id:
+                        logger.info(f"✅ Converted audio saved (audio_id: {audio_id})")
+                    else:
+                        logger.warning("⚠️ Saving converted audio timed out (continuing)")
+                except Exception as audio_save_error:
+                    logger.warning(f"⚠️ Failed to save converted audio: {audio_save_error}")
+                    audio_id = None
+            else:
+                logger.info("⏭️ Save audio disabled — transcription only (audio_id null)")
+
+            transcription_id = None
+            try:
+                transcription_id = save_transcription(
+                    transcription_data, audio_id, source_type='imported'
+                )
+                logger.info(f"📝 Imported transcription saved with ID: {transcription_id}")
+            except Exception as db_error:
+                logger.warning(f"⚠️ Failed to save transcription to DB: {db_error}")
+
+            if audio_id:
+                try:
+                    storage = get_default_storage_manager()
+                    storage.update_audio_status(audio_id, 'transcribed', {
+                        'status': 'transcribed',
+                        'transcription_text': transcription_data.get('text', ''),
+                        'transcription_language': transcription_data.get('language', 'unknown'),
+                        'transcription_duration': transcription_data.get('duration'),
+                        'transcription_attempts': retry_result.attempts,
+                        'transcription_timestamp': datetime.now().isoformat(),
+                        'transcription_id': transcription_id,
+                    })
+                except Exception as meta_err:
+                    logger.warning(f"⚠️ Failed to update audio metadata: {meta_err}")
+
+            notification = create_retry_notification(retry_result)
+
+            response_data = transcription_data.copy()
+            response_data["notification"] = notification
+            response_data["attempts"] = retry_result.attempts
+            response_data["audio_id"] = audio_id
+            response_data["saved_audio_path"] = saved_audio_path
+            response_data["transcription_id"] = transcription_id
+            response_data["source_type"] = "imported"
+
+            logger.info(f"✅ Returning imported transcription (ID: {transcription_id})")
+            return jsonify(response_data)
+
+        else:
+            # Transcription failed after all retries.
+            user_friendly_error = get_user_friendly_error(retry_result.retry_reason, retry_result.error)
+            error_reason = f"{retry_result.retry_reason.value if retry_result.retry_reason else 'unknown'}: {retry_result.error}"
+
+            # Keep the converted MP3 as a temporary failed audio so the existing
+            # retry-from-audio flow can re-run it (mirrors transcribe_audio()).
+            audio_id = None
+            saved_audio_path = None
+            if os.path.exists(converted_path):
+                try:
+                    audio_metadata = {
+                        'original_filename': original_filename,
+                        'import_source': True,
+                        'upload_timestamp': datetime.now().isoformat(),
+                        'status': 'failed',
+                        'is_temporary': True,
+                        'note': 'Saved temporarily for retry - will be deleted on next recording'
+                    }
+                    audio_id, saved_audio_path = save_temp_audio_with_metadata_safe(
+                        temp_path=converted_path,
+                        metadata=audio_metadata,
+                        is_failed=True,
+                        timeout=15
+                    )
+                    if audio_id:
+                        logger.info(f"✅ Converted audio saved temporarily for retry: {audio_id}")
+                except Exception as audio_save_error:
+                    logger.error(f"❌ Error saving converted audio for retry: {audio_save_error}")
+
+            if audio_id:
+                storage = get_default_storage_manager()
+                storage.move_to_failed(audio_id, error_reason)
+                storage.update_audio_status(audio_id, 'failed', {
+                    'status': 'failed',
+                    'error_reason': error_reason,
+                    'failed_attempts': retry_result.attempts,
+                    'failed_timestamp': datetime.now().isoformat(),
+                    'retry_reason': retry_result.retry_reason.value if retry_result.retry_reason else None
+                })
+
+            transcription_id = None
+            try:
+                display_message = f"{user_friendly_error} You can download the audio file."
+                failed_data = {'text': display_message, 'language': None, 'duration': None}
+                transcription_id = save_transcription(
+                    failed_data,
+                    audio_id=audio_id,
+                    status='error',
+                    error_message=error_reason,
+                    source_type='imported'
+                )
+                logger.info(f"📝 Failed imported transcription saved with ID: {transcription_id}")
+            except Exception as db_error:
+                logger.warning(f"⚠️ Failed to save error transcription: {db_error}")
+
+            notification = create_retry_notification(retry_result)
+            return jsonify({
+                "error": "Transcription failed after retries",
+                "details": retry_result.error,
+                "user_message": user_friendly_error,
+                "notification": notification,
+                "attempts": retry_result.attempts,
+                "retry_reason": retry_result.retry_reason.value if retry_result.retry_reason else None,
+                "audio_id": audio_id,
+                "saved_audio_path": saved_audio_path,
+                "transcription_id": transcription_id,
+                "can_download": True
+            }), 500
+
+    except Exception as e:
+        logger.error(f"\n{'='*80}")
+        logger.error("❌ CRITICAL ERROR IN /api/import/transcribe")
+        logger.error(f"{'='*80}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        import traceback
+        logger.error(f"\n📋 Full Traceback:\n{traceback.format_exc()}")
+        logger.error(f"{'='*80}\n")
+        return jsonify({"error": "Import failed", "details": str(e)}), 500
+
+    finally:
+        # Delete every temp file that still exists (converted MP3 is copied into
+        # storage when saved, so unlinking the temp copy here is always safe).
+        for path in (temp_upload_path, converted_path):
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
 
 
 # Database helper functions

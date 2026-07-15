@@ -14,6 +14,10 @@
 </head>
 <body>
     <div class="app-container" id="appContainer">
+        <!-- Drop affordance: subtle inset outline + label shown while dragging a file over the window -->
+        <div class="import-drop-affordance" id="importDropAffordance">
+            <span class="import-drop-label">Drop to transcribe</span>
+        </div>
         <!-- Top Header with Record Button + Title + Actions -->
         <header class="app-header">
             <div class="header-left">
@@ -57,6 +61,10 @@
                     <span>Shortcuts</span>
                     <i class="ph ph-command"></i>
                 </button>
+                <button class="header-icon-button skeleton-shimmer" id="importFileButton" title="Import audio or video file">
+                    <i class="ph ph-file-arrow-up"></i>
+                </button>
+                <input type="file" id="importFileInput" class="hidden" accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.wma,.mp4,.mov,.mkv,.avi,.m4v">
                 <button class="header-icon-button skeleton-shimmer" id="dictionaryButton" title="Dictionary">
                     <i class="ph ph-notebook"></i>
                 </button>

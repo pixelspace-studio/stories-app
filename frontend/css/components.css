@@ -3054,3 +3054,40 @@
     cursor: not-allowed;
     pointer-events: none;
 }
+
+/* ===================================
+   MEDIA IMPORT — drag & drop affordance
+   Boxless, monochrome: a 1px inset outline + a single label. No overlay
+   illustration. Shown only while a file is dragged over the window.
+   =================================== */
+.import-drop-affordance {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    outline: 1px solid var(--gray-60);
+    outline-offset: -8px;
+    background: rgba(255, 255, 255, 0.55);
+    pointer-events: none;
+}
+
+#appContainer.import-dragging .import-drop-affordance {
+    display: flex;
+}
+
+.import-drop-label {
+    font-size: var(--text-sm);
+    letter-spacing: 0.02em;
+    color: var(--gray-70);
+    text-transform: none;
+}
+
+/* Small "imported file" marker beside a history item's timestamp */
+.transcription-source-icon {
+    color: var(--gray-40);
+    margin-right: 4px;
+    font-size: var(--text-sm);
+    vertical-align: baseline;
+}
