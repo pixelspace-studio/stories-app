@@ -976,8 +976,21 @@
     box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
 }
 
-/* Transcript suffix editor — a plain flex row of input + inline buttons.
+/* Transcript suffix editor — plain flex rows (select + trash, input + add).
    No card/enclosure; reuses the surrounding setting spacing. */
+.suffix-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+}
+
+.suffix-row .setting-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin-top: 0; /* row carries the spacing so the trash button stays aligned */
+}
+
 .suffix-editor {
     display: flex;
     align-items: center;
@@ -997,6 +1010,9 @@
     font-weight: 400;
     color: var(--color-text-primary);
     transition: all var(--transition-fast);
+    /* .app-container is a drag region; without no-drag the input never
+       receives focus — clicks turn into window drags. */
+    -webkit-app-region: no-drag;
 }
 
 .setting-text-input:hover {

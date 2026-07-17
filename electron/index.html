@@ -230,34 +230,6 @@
                     </select>
                 </div>
 
-                <!-- Transcript Suffix -->
-                <div class="setting-item setting-item-vertical">
-                    <div class="setting-row">
-                        <div class="setting-label-group">
-                            <span class="setting-label">Append suffix</span>
-                            <span class="setting-tooltip" title="Append a saved word or phrase to the end of every transcription">
-                                <i class="ph ph-info"></i>
-                            </span>
-                        </div>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="transcriptSuffixToggle">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
-                    <div id="transcriptSuffixControls" class="hidden">
-                        <select id="transcriptSuffixSelect" class="setting-select">
-                            <!-- populated from settings; one <option> per item -->
-                        </select>
-                        <div class="suffix-editor">
-                            <input type="text" id="transcriptSuffixInput"
-                                   class="setting-text-input" placeholder="e.g. / blah"
-                                   maxlength="120">
-                            <button id="transcriptSuffixAdd" class="setting-inline-button">Add</button>
-                            <button id="transcriptSuffixDelete" class="setting-inline-button">Delete selected</button>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- ============================================ -->
                 <!-- API KEYS -->
                 <!-- ============================================ -->
@@ -370,6 +342,38 @@
                             <input type="checkbox" id="realtimeFeedToggle">
                             <span class="toggle-slider"></span>
                         </label>
+                    </div>
+                </div>
+
+                <!-- Transcript Suffix -->
+                <div class="setting-item setting-item-vertical">
+                    <div class="setting-row">
+                        <div class="setting-label-group">
+                            <span class="setting-label">Append suffix</span>
+                            <span class="setting-tooltip" title="Append a saved word or phrase to the end of every transcription">
+                                <i class="ph ph-info"></i>
+                            </span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="transcriptSuffixToggle">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div id="transcriptSuffixControls" class="hidden">
+                        <div class="suffix-row">
+                            <select id="transcriptSuffixSelect" class="setting-select">
+                                <!-- populated from settings; one <option> per item -->
+                            </select>
+                            <button class="icon-button-delete" id="transcriptSuffixDelete" title="Delete this suffix">
+                                <i class="ph ph-trash"></i>
+                            </button>
+                        </div>
+                        <div class="suffix-editor">
+                            <input type="text" id="transcriptSuffixInput"
+                                   class="setting-text-input" placeholder="e.g. / blah"
+                                   maxlength="120">
+                            <button id="transcriptSuffixAdd" class="setting-inline-button">Add</button>
+                        </div>
                     </div>
                 </div>
 
