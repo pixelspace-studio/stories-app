@@ -1,257 +1,264 @@
-# Spec: Media File Import (Transcribe Existing Audio/Video Files)
+# Spec: Media File Import (Transcribe Existing Audio/Video Files) — v2
 
-**Status:** Approved for implementation
-**Author:** Claude (architect) — implementation intended for a separate agent
-**Date:** 2026-07-14
-**Related spec:** [SPEC-TRANSCRIPT-SUFFIX.md](SPEC-TRANSCRIPT-SUFFIX.md) (Feature 1 — its `apply_transcript_suffix()` helper is also called from this pipeline)
+**Status:** Approved for implementation — supersedes v1
+**Author:** Claude (architect)
+**Date:** 2026-07-20 (v2), 2026-07-14 (v1)
+**Related:** [SPEC-TRANSCRIPT-SUFFIX.md](SPEC-TRANSCRIPT-SUFFIX.md) · [SPEC-MP3-MIGRATION.md](SPEC-MP3-MIGRATION.md)
+
+---
+
+## 0. Why this document was rewritten (read this first)
+
+v1 of this spec specified `ffmpeg` as a **hard requirement** for the import
+feature. That was wrong and it shipped broken in `0.9.10-10`.
+
+**What went wrong.** ffmpeg is not bundled with Stories and is not part of
+macOS. It only exists on a machine if the user installed it (Homebrew). Worse,
+macOS GUI apps do not inherit the shell `PATH`, so `/opt/homebrew/bin` is
+invisible to the app: the feature fails **even on a machine that has ffmpeg
+installed**. Verified empirically — launching the packaged `0.9.10-10` with a
+Finder-equivalent environment (`PATH=/usr/bin:/bin:/usr/sbin:/sbin`) and POSTing
+an MP3 returns:
+
+```
+{"error":"FFmpeg is required to import files. Install it with: brew install ffmpeg"}
+```
+
+Stories has never required ffmpeg. It appears in exactly two pre-existing
+places, both optional with graceful degradation (`ffprobe` for duration →
+falls back to a 60 s timeout; pydub for "download as MP3" → falls back to
+WebM). v1 turned a months-old optional nicety into a blocking dependency.
+
+**What v2 does instead.** Everything the feature needs is already inside the
+app: Chromium decodes the media, and the existing fluid-mode JS resamples it.
+Only MP3 encoding needs an addition, and that is a dependency-free vendored
+JS library. No system binaries, no user installation, no PATH assumptions.
 
 ---
 
 ## 1. What we are building
 
-The user can hand the app an **existing media file** — audio (MP3, WAV, M4A, …)
-or video (MP4, MOV, …) — and get it transcribed through the exact same engine
-pipeline used for live recordings (Whisper or Gemini, per the STT model
-selector, with the existing auto-fallback).
+The user hands Stories an existing media file — audio (MP3, WAV, M4A…) or video
+(MP4, MOV…) — and gets it transcribed through the same engines as a live
+recording (Whisper or Gemini, per the STT model selector, with existing
+auto-fallback).
 
-Rules, straight from the product ask:
+Three jobs, and nothing else:
 
-- Input can be **audio or video**. For video we only need the audio track: the
-  video stream is ignored/discarded during processing (the original file on
-  disk is never touched).
-- Before sending to the STT engine, the audio is **degraded for voice**: mono,
-  low sample rate — the same philosophy the app already applies in fluid mode.
-- No recording, no chunking: this is a single one-shot transcription of an
-  already-complete file (like the standard "record everything, send one blob"
-  path).
+1. **Get the audio out** of the file (for video: take the audio track, ignore
+   the picture).
+2. **Degrade it for voice** — mono, 16 kHz — so more minutes fit under the
+   engine size ceilings.
+3. **Send it** to the selected engine and save the result like any other
+   transcription.
 
-## 2. Current architecture — what actually happens today (verified)
+## 2. Verified facts this design rests on
 
-Arturo's recollection was that "we compress / re-encode down to mono and a low
-sample rate" before sending audio. **Verified reality:**
+Every number below was measured on this machine, not assumed.
 
-- **Fluid mode (15s chunks):** YES — the frontend captures at 48 kHz
-  (`AudioContext({ sampleRate: 48000 })`), takes the first channel (mono), and
-  downsamples to **16 kHz mono 16-bit WAV** before each chunk upload.
-  See `frontend/components/FluidTranscriptionManager.js:24`
-  (`targetSampleRate = 16000`), `:254` (downsample), `:401` (`_encodeWAV`, mono
-  16-bit). Not 11 or 22 kHz — it's 16 kHz, "Whisper optimal".
-- **Standard mode (whole recording):** NO re-encoding anywhere. MediaRecorder
-  produces `audio/webm;codecs=opus` (`frontend/app.js:1267`), the blob is
-  POSTed to `/api/transcribe` (`processRecording`, `app.js:1708`, with a 25 MB
-  frontend guard), and the backend saves it to a temp `.webm` and sends it
-  **as-is** to Whisper/Gemini (`backend/app.py:596-710`). Opus is already a
-  voice-efficient lossy codec, so this is fine in practice — but there is no
-  explicit mono/16kHz normalization in this path.
+**What Stories sends today (unchanged by this feature):**
 
-This feature therefore **introduces** the explicit normalization step (ffmpeg →
-16 kHz mono) for imported files, matching the fluid-mode precedent of 16 kHz
-mono.
+| Path | Format sent to the engine | Measured |
+|---|---|---|
+| Standard recording | WebM/Opus, 48 kHz **mono**, ~129.5 kbps | Real recordings: 0.93 MB/min; a 17.6-min recording = 16.3 MB |
+| Fluid (15 s chunks) | WAV, 16 kHz mono 16-bit | `FluidTranscriptionManager.js:24,254,401` |
 
-Other verified facts the implementation relies on:
+Stories has **never** sent MP3 to an engine. MP3 only appears in the
+"download audio from history" feature, which is for the user, not the engine.
 
-- **Engine dispatch is centralized:** `run_transcription()`
-  (`backend/app.py:467`) reads `ui_settings.stt_model`, dispatches to Whisper
-  (`retry_logic.transcribe_with_retry`) or Gemini
-  (`gemini_transcription.transcribe_with_gemini`), and transparently falls back
-  to the other engine on transient failures. Reuse it untouched.
-- **ffmpeg is NOT bundled.** The app uses system ffmpeg opportunistically:
-  `ffprobe` for duration (`backend/retry_logic.py:~209`, `get_audio_duration`)
-  and pydub+ffmpeg for the "download as MP3" conversion
-  (`backend/app.py:1513-1615`, with graceful WebM fallback). `pydub==0.25.1` is
-  in `requirements.txt`. The PyInstaller spec (`backend/backend.spec`) bundles
-  no ffmpeg binary.
-- **Gemini path sends inline bytes** with a guessed mime type
-  (`gemini_transcription.py:63` `_audio_mime`, `:170` `inline_data`) — inline
-  requests have a ~20 MB total ceiling. Whisper's file ceiling is 25 MB.
-- **DB is ready:** `transcriptions.source_type` column exists
-  (`TEXT DEFAULT 'standard'`, `app.py:305`) and is threaded through
-  `save_transcription(..., source_type=...)` (`app.py:992`) and returned by the
-  history queries. We add the value `'imported'`.
-- **Electron 33** (`package.json`): the renderer can upload a dropped/picked
-  `File` object directly via `FormData` to the Flask backend — no IPC, no file
-  paths needed (`File.path` no longer exists in Electron ≥32; do not try to use
-  it).
+**Why the recording path has never hit a limit:** `RECORDING_CONFIG.MAX_MINUTES
+= 20` (`electron/main.js:137`) caps recordings, plus a 25 MB frontend guard
+(`frontend/app.js:1788`). At 0.93 MB/min, 20 minutes ≈ 18.5 MB — just under
+Whisper's 25 MB. The ceiling is ~27 minutes; the UI cap is what protects it.
 
-## 3. Pipeline design
+**Why imports need a different format:** an imported file has no 20-minute cap.
+A one-hour video is a normal thing to drop on the window. Measured options:
+
+| Candidate | Size | Minutes in 25 MB | Verdict |
+|---|---|---|---|
+| WAV 16 kHz mono (fluid's format) | 1.92 MB/min | **13** | Too small for long media |
+| WebM/Opus (recording's format) | 0.24 MB/min | ~104 | **Encoding is real-time only** — MediaRecorder has no faster-than-real-time mode, so a 1-hour file would take 1 hour |
+| **MP3 16 kHz mono 48 kbps** | **0.343 MB/min** | **73** | ✅ chosen |
+
+**Engine format support** (from vendor docs, 2026-07-20):
+
+| Engine | Accepts | Size ceiling |
+|---|---|---|
+| Whisper | `mp3, mp4, mpeg, mpga, m4a, wav, webm` | 25 MB |
+| Gemini | `wav, mp3, aiff, aac, ogg, flac` — **not** webm | 20 MB inline |
+
+MP3 is the only compressed format both engines accept cleanly. (Note: the
+existing Gemini path already works around this by labelling WebM as
+`audio/ogg` — `gemini_transcription.py:73`. Out of scope here; see
+SPEC-MP3-MIGRATION.md.)
+
+**End-to-end pipeline proof** — a 3-minute MP4 (video+audio, 7.21 MB) run
+through the exact proposed pipeline inside Electron:
 
 ```
-User picks/drops file (renderer)
-  └─ POST multipart /api/import/transcribe  (field: 'file')
-       1. Validate extension + size ceiling
-       2. Save to temp file (original extension preserved)
-       3. Require ffmpeg (shutil.which) → 503 with friendly message if missing
-       4. Normalize: ffmpeg → 16 kHz mono MP3 48 kbps, video stream dropped (-vn)
-       5. Post-conversion size guard (engine ceilings)
-       6. get_audio_duration(converted)          [existing, ffprobe]
-       7. generate_whisper_prompt_from_dictionary()  [existing]
-       8. run_transcription(converted, prompt, duration)  [existing dispatch + fallback]
-       9. dictionary.apply_corrections(text)     [existing]
-      10. apply_transcript_suffix(text)          [Feature 1 helper]
-      11. save audio (converted mp3) if audio_settings.save_audio_files  [existing storage]
-      12. save_transcription(..., source_type='imported')
-      13. JSON response (same shape as /api/transcribe)
+decode 332 ms → resample 7 ms → MP3 encode 823 ms → total 1.16 s
+= 155× faster than real time
+output: 1.03 MB (0.343 MB/min) → 73 min fits in 25 MB
 ```
 
-Design decisions (already made — do not re-open):
+Chromium decoded `.mp4`, `.mov`, `.mp3`, `.m4a` and `.wav` in this probe —
+including pulling the audio track out of video containers — with no external
+binary. Extrapolated: a 1-hour video processes in ~23 s and yields ~20.6 MB.
 
-- **Always normalize through ffmpeg**, even if the input is already an MP3.
-  One uniform pipeline: guarantees mono/16 kHz degradation, guarantees an
-  engine-accepted format regardless of input container, and makes the size
-  guard meaningful. Cost is a few seconds of CPU.
-- **Target format: MP3, 16 kHz, mono, 48 kbps** (`libmp3lame`). Why not WAV
-  like fluid mode: WAV 16 kHz mono 16-bit is ~1.9 MB/min → 25 MB caps at ~13
-  minutes. MP3 48 kbps is ~0.36 MB/min → ~69 min under Whisper's 25 MB, ~54 min
-  under Gemini's ~20 MB. Voice at 48 kbps mono is transparent for STT purposes.
-- **ffmpeg is a hard requirement for this feature** (not for the rest of the
-  app). If missing, return a clear actionable error (see §4.3). Bundling ffmpeg
-  in the app is future work — note it, don't do it.
-- **No auto-paste for imports.** Auto-paste exists for the record-and-paste
-  flow; when importing, the user is already inside the app looking at history.
-  The result lands in history like any transcription. (Trivial to flip later —
-  it's one `attemptAutoPaste` call.)
-- **No chunking/splitting of long files in v1.** Files whose *converted* audio
-  exceeds the engine ceiling get a clear error telling the user the limit
-  (see §6). Splitting is future work.
-- **This endpoint does not touch `window_manager`** — there is no recording
-  session, no widget state. Keep it out.
+## 3. Architecture
 
-## 4. Backend implementation
+**All media processing moves to the renderer** (the Chromium/JS side). The
+local Flask backend receives a ready-made MP3 and does what it already does
+for recordings.
 
-All in `backend/app.py` unless noted. Follow the logging style of
-`transcribe_audio()` (step banners, per-step timing).
+```
+User drops/picks a file  (renderer)
+  1. Validate extension against the allowlist
+  2. AudioContext.decodeAudioData()      ← Chromium; video picture discarded
+  3. Downsample to 16 kHz mono            ← same math as fluid mode
+  4. Encode MP3 48 kbps                   ← lamejs, vendored, local
+  5. Size guard against the engine ceiling
+  6. POST the MP3 + duration → /api/import/transcribe
 
-### 4.1 Constants + validation
-
-```python
-IMPORT_AUDIO_EXTENSIONS = {'.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.wma'}
-IMPORT_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.mkv', '.avi', '.m4v'}
-IMPORT_ALLOWED_EXTENSIONS = IMPORT_AUDIO_EXTENSIONS | IMPORT_VIDEO_EXTENSIONS
-IMPORT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB — videos are big; audio is extracted anyway
+Backend (local Flask)
+  7. Credential gate                      [existing]
+  8. Dictionary prompt                    [existing]
+  9. run_transcription()                  [existing dispatch + fallback]
+ 10. Dictionary corrections               [existing]
+ 11. apply_transcript_suffix()            [Feature 1]
+ 12. Save audio if enabled + save_transcription(source_type='imported')
 ```
 
-Note: `.webm` appears once — it can carry audio-only or audio+video; ffmpeg
-with `-vn` handles both identically, so no special-casing. (The product ask
-mentioned "WebP" — that's an image format; the intended format is WebM.)
+Decisions (settled — do not re-open):
 
-### 4.2 ffmpeg helpers
+- **The backend keeps no media knowledge.** No ffmpeg, no `subprocess`, no
+  `-vn`, no 503 gate, no temp-conversion dance. Deleting that code is part of
+  this work, not a follow-up.
+- **MP3 is only for this feature.** Recording, fluid, retries and settings are
+  untouched. This is not the MP3 migration (that is its own spec).
+- **Duration is computed in the renderer** from the decoded buffer and sent
+  with the upload. This is strictly better than the existing `ffprobe` path,
+  which returns `N/A` on MediaRecorder WebM and has silently fallen back to a
+  60 s timeout 12,394 times in this machine's logs.
+- **No auto-paste for imports** (unchanged from v1) — the user is in the app
+  looking at history.
+- **No chunking of over-long files in v1.** Files exceeding the ceiling after
+  encoding get a clear, minutes-based error. Chunking is future work and would
+  reuse fluid's proven approach.
 
-```python
-import shutil
+## 4. Frontend implementation
 
-def ffmpeg_available() -> bool:
-    return shutil.which('ffmpeg') is not None
+### 4.1 Vendoring the MP3 encoder
 
-def extract_voice_audio(input_path: str, output_path: str, timeout: int = 600) -> None:
-    """
-    Normalize any audio/video input to STT-ready audio:
-    drop video stream, downmix to mono, resample to 16 kHz, MP3 48 kbps.
-    Raises subprocess.CalledProcessError / TimeoutExpired on failure.
-    """
-    cmd = [
-        'ffmpeg', '-y',
-        '-i', input_path,
-        '-vn',                    # ignore/discard video stream
-        '-ac', '1',               # mono
-        '-ar', '16000',           # 16 kHz — matches fluid-mode precedent
-        '-c:a', 'libmp3lame',
-        '-b:a', '48k',
-        output_path,
-    ]
-    subprocess.run(cmd, capture_output=True, timeout=timeout, check=True)
+Add `@breezystack/lamejs` **as a vendored file**, not a runtime npm import:
+
+- Source: `@breezystack/lamejs@1.2.7`, `dist/lamejs.iife.js`
+- Copy to `frontend/vendor/lamejs.js`
+- Load in `electron/index.html` with a plain `<script src="../frontend/vendor/lamejs.js"></script>`
+  placed **before** `app.js`
+
+Why this shape: the page CSP is `script-src 'self' 'unsafe-inline' …`, so a
+local file loads cleanly; `frontend/` is already packaged (it is not in
+`forge.config.js`'s `ignore` list); and vendoring keeps the exact audited bytes
+in-tree instead of resolving a dependency at build time.
+
+**Audit performed on the package (record it in the commit message):** zero
+dependencies; zero occurrences of `fetch`, `XMLHttpRequest`, `WebSocket`,
+`sendBeacon`, `eval`, `child_process`, `process.env`. The only URL in the code
+is the string `"http://www.mp3dev.org/"`, the LAME project stamp written into
+MP3 headers — not a network call. License LGPL-3.0, unmodified. It is pure
+arithmetic over sample arrays; nothing leaves the machine.
+
+### 4.2 The conversion module
+
+Create `frontend/components/MediaImportConverter.js` — a small class with one
+public method. Keep it separate from `app.js` (which is already ~4000 lines)
+and mirror the style of `FluidTranscriptionManager`.
+
+```javascript
+/**
+ * Converts an arbitrary audio/video File into MP3 bytes ready for the STT
+ * engines: 16 kHz mono, 48 kbps. Runs entirely in the renderer — Chromium
+ * decodes the container (video picture is discarded), the same resampling
+ * math fluid mode uses reduces it to 16 kHz mono, and lamejs encodes MP3.
+ * No external binaries, no network.
+ */
+class MediaImportConverter {
+    constructor() {
+        this.targetSampleRate = 16000; // matches fluid mode
+        this.bitrateKbps = 48;         // 0.343 MB/min measured
+    }
+
+    /**
+     * @param {File} file
+     * @param {(stage: string, ratio: number) => void} [onProgress]
+     * @returns {Promise<{blob: Blob, durationSeconds: number}>}
+     */
+    async convert(file, onProgress) {
+        onProgress?.('decoding', 0);
+        const bytes = await file.arrayBuffer();
+
+        const ctx = new AudioContext();
+        let audioBuffer;
+        try {
+            audioBuffer = await ctx.decodeAudioData(bytes);
+        } catch (e) {
+            throw new Error('NO_AUDIO'); // caller maps to a friendly message
+        } finally {
+            ctx.close();
+        }
+        if (!audioBuffer.length) throw new Error('NO_AUDIO');
+
+        onProgress?.('converting', 0);
+        const pcm = this._toMono16k(audioBuffer);
+        const blob = this._encodeMp3(pcm, onProgress);
+        return { blob, durationSeconds: audioBuffer.duration };
+    }
+
+    // Average all channels down to mono, then decimate to 16 kHz.
+    // (Fluid mode takes channel 0 because a mic stream is already mono —
+    // an imported file can be genuinely stereo, so we average instead of
+    // discarding a channel.)
+    _toMono16k(audioBuffer) {
+        const chans = [];
+        for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+            chans.push(audioBuffer.getChannelData(c));
+        }
+        const ratio = audioBuffer.sampleRate / this.targetSampleRate;
+        const outLen = Math.floor(chans[0].length / ratio);
+        const pcm = new Int16Array(outLen);
+        for (let i = 0; i < outLen; i++) {
+            const idx = Math.floor(i * ratio);
+            let sum = 0;
+            for (let c = 0; c < chans.length; c++) sum += chans[c][idx];
+            const s = Math.max(-1, Math.min(1, sum / chans.length));
+            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return pcm;
+    }
+
+    _encodeMp3(pcm, onProgress) {
+        const encoder = new lamejs.Mp3Encoder(1, this.targetSampleRate, this.bitrateKbps);
+        const parts = [];
+        const BLOCK = 1152; // one MP3 frame
+        for (let i = 0; i < pcm.length; i += BLOCK) {
+            const chunk = encoder.encodeBuffer(pcm.subarray(i, i + BLOCK));
+            if (chunk.length) parts.push(new Uint8Array(chunk));
+            if ((i / BLOCK) % 400 === 0) onProgress?.('converting', i / pcm.length);
+        }
+        const tail = encoder.flush();
+        if (tail.length) parts.push(new Uint8Array(tail));
+        return new Blob(parts, { type: 'audio/mpeg' });
+    }
+}
 ```
 
-On `CalledProcessError`, include a tail of `e.stderr` (last ~500 chars) in the
-log — ffmpeg errors are only diagnosable from stderr. A corrupt/unsupported
-file surfaces here → return HTTP 422 with a friendly message ("Could not read
-audio from this file. The file may be corrupted or DRM-protected.").
+Register it in `index.html` with the other components, before `app.js`.
 
-### 4.3 Endpoint
+### 4.3 `importMediaFile(file)` in `frontend/app.js`
 
-```python
-@app.route('/api/import/transcribe', methods=['POST'])
-def import_and_transcribe():
-    """
-    Transcribe an existing audio/video file uploaded by the user.
-    Expected: multipart/form-data with 'file'.
-    Returns: same JSON shape as /api/transcribe (text, language, duration,
-             stt_model, cost fields, transcription_id, audio_id, notification).
-    """
-```
-
-Flow (mirror `transcribe_audio()`'s structure; deltas listed):
-
-1. `stt_credentials_ok()` gate — identical to `transcribe_audio()` (503 on
-   missing key).
-2. Validate: file present, extension in `IMPORT_ALLOWED_EXTENSIONS` (else 415
-   with the allowed list in the message), `request.content_length` under
-   `IMPORT_MAX_UPLOAD_BYTES` (else 413).
-3. `if not ffmpeg_available(): return 503` with:
-   `"FFmpeg is required to import files. Install it with: brew install ffmpeg"`.
-   The frontend shows this string verbatim in a toast.
-4. Save upload to `tempfile.NamedTemporaryFile(delete=False, suffix=<original ext>)`
-   — the real extension matters so ffmpeg picks the right demuxer.
-5. `extract_voice_audio(...)` into a second temp file `... suffix='.mp3'`.
-   Delete the raw upload temp file immediately after conversion succeeds
-   (videos can be huge; don't hold both).
-6. Post-conversion size guard:
-
-   ```python
-   GEMINI_INLINE_CEILING = 19 * 1024 * 1024   # keep margin under the ~20 MB request cap
-   WHISPER_FILE_CEILING  = 25 * 1024 * 1024
-   ceiling = GEMINI_INLINE_CEILING if get_stt_model() in GEMINI_MODELS else WHISPER_FILE_CEILING
-   ```
-
-   If exceeded → 413 with a duration-oriented message ("This file is too long
-   (~N minutes of audio). Maximum is about 50–65 minutes."). Compute N from
-   `get_audio_duration()`. Note: fallback could switch engines mid-request, so
-   using the *smaller* ceiling unconditionally is also acceptable — implementer's
-   choice; document which in a comment.
-7. Duration + dictionary prompt + `run_transcription(...)` — copy the
-   step 4/5/6 sequence from `transcribe_audio()` (`app.py:680-710`).
-8. On success: dictionary `apply_corrections`, then
-   `apply_transcript_suffix` (Feature 1), then — if
-   `audio_settings.save_audio_files` is on — store the **converted MP3** via
-   `save_temp_audio_with_metadata_safe(...)` with metadata
-   `{'original_filename': file.filename, 'import_source': True, ...}`, then
-   `save_transcription(transcription_data, audio_id, source_type='imported')`.
-9. On failure: reuse `get_user_friendly_error(...)`; save a failed history
-   entry the same way `transcribe_audio()` does. Keeping the converted MP3 as a
-   temporary failed audio (for the existing retry-from-audio flow) is a nice
-   bonus — reuse the `is_temporary` metadata pattern (`app.py:800-830`).
-10. `finally`: delete every temp file that still exists.
-
-This is a long-running synchronous request (upload + ffmpeg + STT). That is
-exactly how `/api/transcribe` already behaves — acceptable. Flask runs
-threaded, so the UI stays responsive.
-
-### 4.4 What NOT to change
-
-- `run_transcription`, `retry_logic`, `gemini_transcription` — no changes.
-  The converted file is a plain MP3; `_audio_mime` already maps `.mp3`.
-- `/api/transcribe` — untouched.
-- `window_manager` — untouched (no session).
-
-## 5. Frontend implementation
-
-### 5.1 Entry points (two)
-
-1. **Header button** — an icon button next to the existing dictionary/settings
-   buttons (`electron/index.html:60-63`, `header-icon-button` class,
-   Phosphor icon `ph-file-arrow-up`, `title="Import audio or video file"`),
-   which clicks a hidden `<input type="file" id="importFileInput"
-   accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.wma,.mp4,.mov,.mkv,.avi,.m4v">`.
-2. **Drag & drop** onto the main window: `dragover`/`dragleave`/`drop` on
-   `#appContainer`; on `dragover` add a CSS class that shows a subtle
-   full-window drop affordance (a 1px inset outline + "Drop to transcribe"
-   label — boxless, monochrome, consistent with the app's register; no giant
-   overlay illustration). Take `event.dataTransfer.files[0]` — single file
-   only in v1; if multiple are dropped, take the first and toast
-   "One file at a time."
-
-Both funnel into one method.
-
-### 5.2 `importMediaFile(file)` in `frontend/app.js`
+Replace the v1 implementation. Keep both entry points (header button + drag &
+drop on `#appContainer`) and the extension allowlist exactly as they are.
 
 ```javascript
 async importMediaFile(file) {
@@ -260,85 +267,128 @@ async importMediaFile(file) {
         return;
     }
     const ext = '.' + file.name.split('.').pop().toLowerCase();
-    // Keep this list in sync with IMPORT_ALLOWED_EXTENSIONS (backend)
     if (!IMPORT_ALLOWED_EXTENSIONS.includes(ext)) {
         this.showToast(`Unsupported file type: ${ext}`, 'error');
         return;
     }
 
-    this.updateUIForTranscribing();          // reuse existing state
-    if (window.electronAPI?.syncRecordingState) {
-        window.electronAPI.syncRecordingState('main_transcribing');
-    }
+    this.updateUIForTranscribing();
+    window.electronAPI?.syncRecordingState?.('main_transcribing');
 
     try {
-        const formData = new FormData();
-        formData.append('file', file);
-        const result = await this.api.importTranscribe(formData);
+        // Decode + downsample + MP3, all local
+        const converter = new MediaImportConverter();
+        const { blob, durationSeconds } = await converter.convert(file);
 
-        if (result && result.text) {
-            if (window.soundManager) soundManager.playTranscriptionReady();
-            await this.loadTranscriptionHistory();
-            this.showToast('File transcribed.', 'success');
-            // Deliberate: no attemptAutoPaste() for imports (see spec §3)
-        } else {
-            throw new Error(result?.error || 'Import failed');
+        // Engine ceiling check BEFORE spending an API call
+        const isGemini = (await this.getSttModel() || '').startsWith('gemini');
+        const ceiling = isGemini ? 19 * 1024 * 1024 : 25 * 1024 * 1024;
+        if (blob.size > ceiling) {
+            const minutes = Math.round(durationSeconds / 60);
+            const maxMinutes = Math.floor(ceiling / (0.343 * 1024 * 1024));
+            throw new Error(
+                `This file is too long (about ${minutes} minutes). ` +
+                `The current engine accepts up to about ${maxMinutes} minutes.`
+            );
         }
+
+        const formData = new FormData();
+        formData.append('file', blob, file.name.replace(/\.[^.]+$/, '') + '.mp3');
+        formData.append('original_filename', file.name);
+        formData.append('duration_seconds', String(durationSeconds));
+
+        const result = await this.api.importTranscribe(formData, durationSeconds);
+        if (!result || !result.text) throw new Error(result?.error || 'Import failed');
+
+        if (window.soundManager) soundManager.playTranscriptionReady();
+        await this.loadTranscriptionHistory();
+        this.showToast('File transcribed.', 'success');
+        // Deliberate: no attemptAutoPaste() for imports
     } catch (error) {
-        this.showToast(error.message || 'Import failed', 'error');
+        const message = error.message === 'NO_AUDIO'
+            ? 'No readable audio found in this file. It may be video-only, corrupted, or protected.'
+            : (error.message || 'Import failed');
+        this.showToast(message, 'error');
+        await this.loadTranscriptionHistory(); // surface any failed-import card
     } finally {
         this.updateUIForIdle();
-        if (window.electronAPI?.syncRecordingState) {
-            window.electronAPI.syncRecordingState('main_transcription_completed');
-        }
+        window.electronAPI?.syncRecordingState?.('main_transcription_completed');
     }
 }
 ```
 
-Telemetry: `track('file_imported', { extension: ext, size_mb, duration_seconds,
-success })` following the existing event style.
+Notes for the implementer:
 
-### 5.3 `APIClient.importTranscribe(formData)`
+- `getSttModel()` — read `ui_settings.stt_model` the way the settings panel
+  already does; if a helper does not exist, fetch the setting inline.
+- The `loadTranscriptionHistory()` call in `catch` fixes a real v1 gap: the
+  backend persists a failed-import card that the UI never refreshed.
+- `APIClient.importTranscribe(formData, durationSeconds)` keeps its generous
+  timeout, but may now pass the known duration like `transcribe()` does.
+- Telemetry: keep `file_imported` and add `source_extension`, `duration_seconds`,
+  `output_mb`.
 
-Mirror `APIClient.transcribe()` (`frontend/components/APIClient.js:103`): same
-AbortController/timeout pattern, but the duration is unknown before upload —
-use a generous fixed timeout (suggest 15 minutes) since it covers upload +
-ffmpeg + STT of potentially an hour of audio.
+## 5. Backend implementation — mostly deletion
 
-### 5.4 History display
+In `backend/app.py`, `/api/import/transcribe` becomes a thin sibling of
+`transcribe_audio()`. **Delete** all of this:
 
-`source_type: 'imported'` already flows through the history API. Optional but
-cheap: in the history item renderer, when `source_type === 'imported'`, show a
-small `ph-file-arrow-up` icon beside the timestamp (same treatment as any
-existing per-item metadata; no new visual language).
+- `ffmpeg_available()` and `extract_voice_audio()` helpers
+- the `IMPORT_VIDEO_EXTENSIONS` / video handling and the `-vn` conversion step
+- the ffmpeg 503 gate and its `brew install` message
+- the two-temp-file conversion dance, its `subprocess` imports and stderr parsing
+- `IMPORT_MIN_AUDIO_BYTES` and the ffmpeg-stderr string matching
 
-## 6. Edge cases (test these)
+**Keep and adjust:**
 
-1. **Video with no audio track** — ffmpeg `-vn` on a silent MP4 fails or emits
-   an empty file → detect zero/near-zero output size or ffmpeg error → 422
-   "No audio track found in this file."
-2. **ffmpeg missing** → 503 with the brew message; frontend toast shows it.
-3. **Huge video (e.g. 1.5 GB MOV)** → passes upload guard, converts, and the
-   *converted audio* decides transcribability. Temp raw file deleted right
-   after conversion.
-4. **Converted audio over engine ceiling** → 413 with minutes-based message;
-   no STT call is made (don't waste API cost).
-5. **Corrupt/DRM/renamed file** (a `.mp3` that is actually a PDF) → ffmpeg
-   fails → 422 friendly message; stderr tail in backend log.
-6. **Import while recording** → blocked in frontend (§5.2 guard).
-7. **Suffix feature enabled** → imported transcripts get the suffix too
-   (uniform pipeline, Feature 1 §4.2 call site 5).
-8. **`save_audio_files` off** → nothing stored, transcription still saved to
-   history (audio_id null) — same semantics as standard path.
-9. **Filename with spaces/unicode/emoji** — only used as metadata and temp-file
-   suffix source; use `os.path.splitext` on the werkzeug filename for the
-   extension, never trust it for paths.
+1. Credential gate (`stt_credentials_ok()`) → 503, unchanged.
+2. Accept `file` (an MP3), plus optional `original_filename` and
+   `duration_seconds` form fields.
+3. Validate that the upload is present and non-empty → 400.
+4. Size guard against the engine ceiling → 413 (defence in depth; the renderer
+   checks first).
+5. Duration: use the posted `duration_seconds` when present; only fall back to
+   `get_audio_duration()` if absent.
+6. Dictionary prompt → `run_transcription()` → dictionary corrections →
+   `apply_transcript_suffix()` — all existing calls, unchanged order.
+7. Save the MP3 via `save_temp_audio_with_metadata_safe()` when
+   `audio_settings.save_audio_files` is on; metadata keeps
+   `original_filename` (the user's real filename) and `import_source: True`.
+8. `save_transcription(..., source_type='imported')` on success; on failure
+   mirror `transcribe_audio()`'s failed-card + temporary-audio-for-retry path.
+9. Delete the temp file in `finally`.
+10. Never touch `window_manager`.
 
-## 7. Out of scope for v1 (explicitly noted future work)
+The extension allowlist stays **frontend-only** now (the backend only ever
+receives MP3). Keep `IMPORT_ALLOWED_EXTENSIONS` in the frontend and in the
+`<input accept="…">`, and keep them identical to each other.
 
-- **Bundling ffmpeg** with the app (electron resources or PyInstaller binaries)
-  so the feature works without Homebrew.
-- **Chunked transcription of long files** (split converted audio into segments,
-  transcribe serially, join) to lift the ~1 hour ceiling.
-- **Batch import** (multiple files / a folder).
-- **Keeping video association** (Stories v2 multi-track territory).
+## 6. Edge cases (test each)
+
+1. **Video with no audio track** → `decodeAudioData` rejects → `NO_AUDIO` →
+   friendly toast, no API call, no cost.
+2. **Corrupt / DRM / renamed file** (a `.mp3` that is a PDF) → same path.
+3. **Stereo source** → averaged to mono, not half-discarded (verify a
+   hard-panned stereo file keeps both sides audible).
+4. **Exotic container Chromium cannot decode** (`.mkv`, `.avi`, `.wma`) →
+   `NO_AUDIO` with the friendly message. Decide per-format whether to keep it
+   in the allowlist; prefer honesty — remove extensions Chromium cannot open
+   rather than offering them and failing.
+5. **Very long file over the ceiling** → minutes-based error before any API
+   call. Verify the number quoted is derived, not hardcoded.
+6. **Import while recording** → blocked with a toast.
+7. **Suffix enabled** → imported transcript gets the suffix.
+8. **`save_audio_files` off** → transcription saved, `audio_id` null.
+9. **Unicode / emoji filename** → survives to history metadata intact.
+10. **Regression sweep — must be untouched:** record normally, record with
+    fluid on, retry from history, and change settings. All exactly as before.
+11. **The ffmpeg proof:** run the packaged app with
+    `env -i HOME=$HOME PATH=/usr/bin:/bin:/usr/sbin:/sbin` and import a file
+    successfully. This is the test v1 failed.
+
+## 7. Out of scope
+
+- Chunking long files (would reuse fluid's approach) — future work.
+- Batch import of several files at once.
+- Any change to how live recordings are captured or encoded — see
+  [SPEC-MP3-MIGRATION.md](SPEC-MP3-MIGRATION.md).
