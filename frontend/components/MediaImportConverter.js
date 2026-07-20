@@ -27,8 +27,25 @@ class MediaImportConverter {
         try {
             audioBuffer = await ctx.decodeAudioData(bytes);
         } catch (e) {
-            // Chromium could not open the container or found no audio track.
-            // The caller maps NO_AUDIO to a friendly message.
+            // Always keep the original error: once it is relabelled below the
+            // only remaining evidence for a support report is this log line.
+            console.error('[MediaImportConverter] decodeAudioData failed:', e);
+
+            // Decoding a long file allocates the whole PCM buffer at once (a
+            // 90-minute 48 kHz stereo source is ~1.6 GB), so allocation
+            // failures are a normal outcome for big media — not a bad file.
+            // Blaming the file here sends the user chasing a phantom problem.
+            const message = (e && e.message) || '';
+            if (e instanceof RangeError || /allocat|out of memory/i.test(message)) {
+                throw new Error('OUT_OF_MEMORY');
+            }
+            // The AudioContext was closed or the decode aborted underneath us
+            // (e.g. the window went away). Again, not a property of the file.
+            if (e && (e.name === 'InvalidStateError' || e.name === 'AbortError')) {
+                throw new Error('DECODE_ABORTED');
+            }
+            // Genuine decode failure: Chromium could not open the container or
+            // found no audio track. The caller maps NO_AUDIO to a friendly message.
             throw new Error('NO_AUDIO');
         } finally {
             // close() is async; failures here are irrelevant to the result.

@@ -78,6 +78,7 @@ class VoiceToTextApp {
         
         // Legacy state (will be migrated to StateManager)
         this.isRecording = false;
+        this.isImporting = false; // guards importMediaFile against concurrent runs
         this.mediaRecorder = null;
         this.audioChunks = [];
         this.startTime = null;
@@ -2691,6 +2692,16 @@ class VoiceToTextApp {
      * the result lands in history (see SPEC-MEDIA-FILE-IMPORT §3).
      */
     async importMediaFile(file) {
+        // Single funnel for both entry points (header picker + drag & drop), so
+        // one guard here covers both. Without it a second file dropped while the
+        // first is still converting would run a parallel AudioContext + decoded
+        // buffer, and — worse — whichever import finished first would run the
+        // finally block below, flipping the UI back to idle and re-arming the
+        // record button while the other upload was still in flight.
+        if (this.isImporting) {
+            this.showToast('An import is already in progress.', 'error');
+            return;
+        }
         if (this.isRecording) {
             this.showToast('Stop the current recording before importing a file.', 'error');
             return;
@@ -2707,6 +2718,7 @@ class VoiceToTextApp {
         let durationSeconds = 0;
         let outputMb = 0;
 
+        this.isImporting = true;
         this.updateUIForTranscribing();          // reuse existing state
         if (window.electronAPI && window.electronAPI.syncRecordingState) {
             window.electronAPI.syncRecordingState('main_transcribing');
@@ -2752,13 +2764,19 @@ class VoiceToTextApp {
                 throw new Error((result && result.error) || 'Import failed');
             }
         } catch (error) {
-            const message = error.message === 'NO_AUDIO'
-                ? 'No readable audio found in this file. It may be video-only, corrupted, or protected.'
-                : (error.message || 'Import failed');
+            const IMPORT_ERROR_MESSAGES = {
+                NO_AUDIO: 'No readable audio found in this file. It may be video-only, corrupted, or protected.',
+                OUT_OF_MEMORY: 'This file is too large to decode in one pass. Try a shorter clip or a smaller file.',
+                DECODE_ABORTED: 'Decoding was interrupted before it finished. Please try importing the file again.'
+            };
+            const message = IMPORT_ERROR_MESSAGES[error.message]
+                || error.message
+                || 'Import failed';
             this.showToast(message, 'error');
             // The backend persists a failed-import card; refresh so it shows.
             await this.loadTranscriptionHistory();
         } finally {
+            this.isImporting = false;
             this.updateUIForIdle();
             if (window.electronAPI && window.electronAPI.syncRecordingState) {
                 window.electronAPI.syncRecordingState('main_transcription_completed');
