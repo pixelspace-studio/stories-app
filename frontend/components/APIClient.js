@@ -138,11 +138,13 @@ class APIClient {
         }
     }
     
-    async importTranscribe(formData) {
-        // Duration is unknown before upload, and the request covers upload +
-        // ffmpeg conversion + STT of potentially ~an hour of audio, so use a
-        // generous fixed timeout (15 minutes).
-        const timeoutMs = 15 * 60 * 1000;
+    async importTranscribe(formData, audioDuration = null) {
+        // Conversion now happens in the renderer, so this request is just
+        // upload + STT. The duration is known by then, so scale the timeout the
+        // way transcribe() does, with a floor that covers uploading a long MP3.
+        const timeoutMs = audioDuration
+            ? Math.max(((audioDuration * 2) + 90) * 1000, 5 * 60 * 1000)
+            : 15 * 60 * 1000;
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {

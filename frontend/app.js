@@ -1,11 +1,24 @@
 // Voice to Text App V2 - Frontend JavaScript
 
-// Allowed media-import extensions. Keep in sync with IMPORT_ALLOWED_EXTENSIONS
-// (backend/app.py) and the accept="" list on #importFileInput.
+// Allowed media-import extensions. Decoding happens in the renderer via
+// Chromium (see MediaImportConverter), so this list is frontend-only — the
+// backend now only ever receives MP3. Keep in sync with the accept="" list on
+// #importFileInput.
+//
+// Every entry below was verified to decode in Electron's Chromium. `.avi` and
+// `.wma` are deliberately absent: they failed for every audio codec tested
+// (AVI with MP3 and with AAC; WMA/wmav2), so offering them would only produce
+// a guaranteed error. `.mkv` stays — it decodes with AAC, MP3 and Vorbis
+// audio; the AC3 case degrades to the friendly "no readable audio" message.
 const IMPORT_ALLOWED_EXTENSIONS = [
-    '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm', '.wma',
-    '.mp4', '.mov', '.mkv', '.avi', '.m4v'
+    '.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.webm',
+    '.mp4', '.mov', '.mkv', '.m4v'
 ];
+
+// Measured output rate of MediaImportConverter (16 kHz mono MP3 @ 48 kbps):
+// 0.344 MB per minute of audio, consistent across every container tested.
+// Used to turn an engine size ceiling into a "maximum minutes" message.
+const IMPORT_MB_PER_MINUTE = 0.344;
 
 /**
  * Improves generic frontend error messages to be more user-friendly
@@ -2692,6 +2705,7 @@ class VoiceToTextApp {
         const sizeMb = file.size ? +(file.size / 1024 / 1024).toFixed(2) : 0;
         let success = false;
         let durationSeconds = 0;
+        let outputMb = 0;
 
         this.updateUIForTranscribing();          // reuse existing state
         if (window.electronAPI && window.electronAPI.syncRecordingState) {
@@ -2699,13 +2713,37 @@ class VoiceToTextApp {
         }
 
         try {
+            // Decode + downsample + MP3, all local (Chromium + vendored lamejs).
+            const converter = new MediaImportConverter();
+            const converted = await converter.convert(file);
+            const blob = converted.blob;
+            durationSeconds = converted.durationSeconds;
+            outputMb = +(blob.size / 1024 / 1024).toFixed(2);
+
+            // Engine ceiling check BEFORE spending an API call.
+            const sttModel = (await this.getSttModel()) || '';
+            const isGemini = sttModel.startsWith('gemini');
+            const ceiling = isGemini ? 19 * 1024 * 1024 : 25 * 1024 * 1024;
+            if (blob.size > ceiling) {
+                // Derive the quoted limit from the measured output rate rather
+                // than hardcoding a minutes figure, so it tracks the bitrate.
+                const minutes = Math.round(durationSeconds / 60);
+                const maxMinutes = Math.floor(ceiling / (IMPORT_MB_PER_MINUTE * 1024 * 1024));
+                throw new Error(
+                    `This file is too long (about ${minutes} minutes). ` +
+                    `The current engine accepts up to about ${maxMinutes} minutes.`
+                );
+            }
+
             const formData = new FormData();
-            formData.append('file', file);
-            const result = await this.api.importTranscribe(formData);
+            formData.append('file', blob, file.name.replace(/\.[^.]+$/, '') + '.mp3');
+            formData.append('original_filename', file.name);
+            formData.append('duration_seconds', String(durationSeconds));
+
+            const result = await this.api.importTranscribe(formData, durationSeconds);
 
             if (result && result.text) {
                 success = true;
-                durationSeconds = result.duration_seconds || result.duration || 0;
                 if (window.soundManager) soundManager.playTranscriptionReady();
                 await this.loadTranscriptionHistory();
                 this.showToast('File transcribed.', 'success');
@@ -2714,7 +2752,12 @@ class VoiceToTextApp {
                 throw new Error((result && result.error) || 'Import failed');
             }
         } catch (error) {
-            this.showToast(error.message || 'Import failed', 'error');
+            const message = error.message === 'NO_AUDIO'
+                ? 'No readable audio found in this file. It may be video-only, corrupted, or protected.'
+                : (error.message || 'Import failed');
+            this.showToast(message, 'error');
+            // The backend persists a failed-import card; refresh so it shows.
+            await this.loadTranscriptionHistory();
         } finally {
             this.updateUIForIdle();
             if (window.electronAPI && window.electronAPI.syncRecordingState) {
@@ -2723,7 +2766,9 @@ class VoiceToTextApp {
             try {
                 await this.telemetry.track('file_imported', {
                     extension: ext,
+                    source_extension: ext,
                     size_mb: sizeMb,
+                    output_mb: outputMb,
                     duration_seconds: durationSeconds,
                     success: success
                 });
@@ -4169,6 +4214,21 @@ class VoiceToTextApp {
             console.error('❌ Error removing Gemini key:', e);
             this.showToast('Error removing Gemini Key', 'error');
         }
+    }
+
+    /**
+     * Read the active STT engine id (e.g. 'whisper', 'gemini-flash').
+     * Falls back to 'whisper', matching checkActiveEngineHasKey().
+     */
+    async getSttModel() {
+        try {
+            const r = await fetch(`${this.backendUrl}/api/config/settings/ui_settings.stt_model`);
+            if (r.ok) {
+                const d = await r.json();
+                return d.value || 'whisper';
+            }
+        } catch (e) { /* fall back to whisper */ }
+        return 'whisper';
     }
 
     async loadSttModelSetting() {

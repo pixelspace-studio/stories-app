@@ -64,7 +64,7 @@
                 <button class="header-icon-button skeleton-shimmer" id="importFileButton" title="Import audio or video file">
                     <i class="ph ph-file-arrow-up"></i>
                 </button>
-                <input type="file" id="importFileInput" class="hidden" accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.wma,.mp4,.mov,.mkv,.avi,.m4v">
+                <input type="file" id="importFileInput" class="hidden" accept=".mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.mkv,.m4v">
                 <button class="header-icon-button skeleton-shimmer" id="dictionaryButton" title="Dictionary">
                     <i class="ph ph-notebook"></i>
                 </button>
@@ -748,6 +748,11 @@
     </div>
     
     <!-- Component Scripts (load before app.js) -->
+    <!-- Vendored LGPL-3.0 MP3 encoder (@breezystack/lamejs 1.2.7, dist/lamejs.iife.js),
+         unmodified. Local file, zero dependencies, no network access — used only
+         by MediaImportConverter to encode imported media. Must load before it. -->
+    <script src="../frontend/vendor/lamejs.js"></script>
+    <script src="../frontend/components/MediaImportConverter.js"></script>
     <script src="../frontend/components/ModalManager.js"></script>
     <script src="../frontend/components/StateManager.js"></script>
     <script src="../frontend/components/TelemetryClient.js"></script>
