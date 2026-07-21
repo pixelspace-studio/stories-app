@@ -1000,6 +1000,16 @@ class WidgetApp {
                 console.warn('⚠️ Widget: Fluid transcription returned empty text');
                 this.stopTimer();
                 await this.setWidgetState('inactive');
+                // Clear the main window's "Transcribing..." state. Without this the
+                // main window, which entered that state on widget_recording_stopped,
+                // waits forever for a completion it only gets on the success/error
+                // paths (see lines below) — a fully-silent recording (every chunk
+                // dropped by silence detection) would otherwise hang its spinner.
+                if (window.electronAPI && window.electronAPI.syncRecordingState) {
+                    try {
+                        await window.electronAPI.syncRecordingState('transcription_completed');
+                    } catch (e) { /* ignore */ }
+                }
                 return;
             }
 
