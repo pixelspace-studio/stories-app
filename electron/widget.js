@@ -282,7 +282,7 @@ class WidgetApp {
                 this.cancelButton.style.opacity = '1';
                 this.timerDisplay.style.opacity = '1';
                 if (window.electronAPI && window.electronAPI.resizeWidget) {
-                    window.electronAPI.resizeWidget(130, 40); // fire-and-forget, no await
+                    window.electronAPI.resizeWidget(152, 40); // fire-and-forget, no await
                 }
             }
 
@@ -407,8 +407,19 @@ class WidgetApp {
 
             // Request microphone access
             const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
-            
+
             console.log('🎛️ Microphone access granted!');
+
+            // Register the stream so every path that ends a recording can release
+            // the mic. Streams used to leak on the normal stop path — the orange
+            // mic indicator stayed on forever and a leaked live stream is what fed
+            // the orphan-worklet bug. (macOS remembers the permission per app, so
+            // releasing tracks never re-prompts the user.)
+            if (!this._micStreams) this._micStreams = [];
+            this._micStreams.push(stream);
+
+            // Live voice bars next to the timer — driven by this same stream
+            this._setupWidgetVisualizer(stream);
             console.log('🎛️ Stream:', stream);
             console.log('🎛️ Audio tracks:', stream.getAudioTracks().length);
             
@@ -548,6 +559,12 @@ class WidgetApp {
             // Stop mediaRecorder and timer FIRST — user expects immediate response
             this.mediaRecorder.stop();
             this.stopTimer();
+
+            // Release the mic. The recorded data is already in audioChunks and the
+            // fluid buffer; keeping tracks live only kept the orange indicator on
+            // and left a stream for leaked audio graphs to listen to.
+            this._releaseMicStreams();
+            this._teardownWidgetVisualizer();
 
             // THEN stop fluid silently if we switched to instruction/prompt mode mid-recording
             if (this.isInstructionMode && this.fluidTranscription && this.fluidTranscription.isActive()) {
@@ -1492,7 +1509,90 @@ class WidgetApp {
         }, 1200);
     }
 
+    /**
+     * Stop every mic stream this widget ever opened. Part of the post-story
+     * cleanup protocol: showInactiveState() is the terminal state of every path
+     * (success, cancel, error, transforms), so sweeping here guarantees the mic
+     * is released no matter how a story ended. Idempotent — stopping an already
+     * ended track is a no-op.
+     */
+    _releaseMicStreams() {
+        if (!this._micStreams || this._micStreams.length === 0) return;
+        let liveCount = 0;
+        for (const stream of this._micStreams) {
+            for (const track of stream.getTracks()) {
+                if (track.readyState === 'live') {
+                    liveCount++;
+                    track.stop();
+                }
+            }
+        }
+        if (liveCount > 0) console.log(`🛑 Released ${liveCount} live mic track(s)`);
+        this._micStreams = [];
+    }
+
+    /**
+     * Live voice bars: analyser on the actual recording stream, mirroring the
+     * main window's visualizer. If the bars don't react while the user speaks,
+     * the mic is not delivering audio — the early warning that would have saved
+     * the stories lost to silent non-recording states.
+     */
+    _setupWidgetVisualizer(stream) {
+        try {
+            this._teardownWidgetVisualizer();
+            this._vizCtx = new AudioContext();
+            this._vizAnalyser = this._vizCtx.createAnalyser();
+            this._vizAnalyser.fftSize = 256;
+            this._vizAnalyser.smoothingTimeConstant = 0.7;
+            this._vizSource = this._vizCtx.createMediaStreamSource(stream);
+            this._vizSource.connect(this._vizAnalyser);
+            this._vizData = new Uint8Array(this._vizAnalyser.frequencyBinCount);
+            const el = document.getElementById('widgetVisualizer');
+            if (el) el.classList.add('active');
+            this._animateWidgetVisualizer();
+        } catch (e) {
+            console.warn('Widget visualizer setup failed:', e);
+        }
+    }
+
+    _animateWidgetVisualizer() {
+        if (!this._vizAnalyser) return;
+        this._vizAnalyser.getByteFrequencyData(this._vizData);
+        const bars = document.querySelectorAll('#widgetVisualizer .wv-bar');
+        bars.forEach((bar, i) => {
+            // Each bar follows its own low-mid frequency band (voice energy)
+            const bandStart = 2 + i * 6;
+            const band = this._vizData.slice(bandStart, bandStart + 6);
+            const avg = band.reduce((a, b) => a + b, 0) / band.length;
+            const norm = Math.min(avg / 128, 1);
+            bar.style.height = `${4 + norm * 12}px`;
+        });
+        this._vizRaf = requestAnimationFrame(() => this._animateWidgetVisualizer());
+    }
+
+    _teardownWidgetVisualizer() {
+        if (this._vizRaf) {
+            cancelAnimationFrame(this._vizRaf);
+            this._vizRaf = null;
+        }
+        const el = document.getElementById('widgetVisualizer');
+        if (el) el.classList.remove('active');
+        if (this._vizSource) {
+            try { this._vizSource.disconnect(); } catch (e) { /* ignore */ }
+            this._vizSource = null;
+        }
+        this._vizAnalyser = null;
+        if (this._vizCtx && this._vizCtx.state !== 'closed') {
+            try { this._vizCtx.close(); } catch (e) { /* ignore */ }
+        }
+        this._vizCtx = null;
+    }
+
     async showInactiveState() {
+        // ---- Post-story cleanup protocol: release the mic + analyser ----
+        this._releaseMicStreams();
+        this._teardownWidgetVisualizer();
+
         // ---- Clean up ALL transform state ----
         this._clearTransformCountdown();
         this.transformDropdown.classList.remove('open');
@@ -1568,7 +1668,7 @@ class WidgetApp {
     async showStartingState() {
         // Expanded widget - 130x40 (horizontal layout)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(130, 40);
+            await window.electronAPI.resizeWidget(152, 40);
         }
         
         this.widgetContainer.classList.remove('compact');
@@ -1590,11 +1690,19 @@ class WidgetApp {
     }
 
     async showRecordingState() {
+        // A recording can now start straight from the transform countdown/dropdown
+        // (shortcut press while transform UI is up) — clear that UI so it doesn't
+        // stay overlaid on the recording layout.
+        this._clearTransformCountdown();
+        this.transformDropdown.classList.remove('open');
+        this.transformButton.classList.remove('visible', 'pulsing', 'active');
+        this.widgetContainer.classList.remove('dropdown-open');
+
         // Expanded widget - 130x40 (horizontal layout)
         // Use 'down' (keep position) in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             const dir = this.isInstructionMode ? 'down' : undefined;
-            await window.electronAPI.resizeWidget(130, 40, dir);
+            await window.electronAPI.resizeWidget(152, 40, dir);
         }
 
         this.widgetContainer.classList.remove('compact');
@@ -1622,7 +1730,7 @@ class WidgetApp {
     async showRecordingActiveState() {
         // Same as recording state, but DON'T re-animate button (already showing stop)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(130, 40);
+            await window.electronAPI.resizeWidget(152, 40);
         }
         
         this.widgetContainer.classList.remove('compact');
@@ -1680,7 +1788,7 @@ class WidgetApp {
         // Use 'down' in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             const dir = this.isInstructionMode ? 'down' : undefined;
-            await window.electronAPI.resizeWidget(130, 40, dir);
+            await window.electronAPI.resizeWidget(152, 40, dir);
         }
 
         this.widgetContainer.classList.remove('compact');
@@ -2004,7 +2112,22 @@ class WidgetApp {
         if (window.electronAPI && window.electronAPI.onOpenTransformDropdown) {
             window.electronAPI.onOpenTransformDropdown((event, transcriptionId) => {
                 if (transcriptionId) this._lastTranscriptionId = transcriptionId;
-                this._openTransformDropdown();
+                // Honor the transform request only while the 3-2-1 countdown is on
+                // screen AND the dropdown can actually open. In every other case the
+                // press meant "start a new recording" — _openTransformDropdown() used
+                // to no-op silently here (missing presets/id, or countdown already
+                // expired), which swallowed the press: the user talked for minutes
+                // believing they were recording. Fall through to the record action
+                // instead so a shortcut press always has a visible effect.
+                const canOpenDropdown = this.currentState === 'transform_ready'
+                    && this._transformPresets && this._lastTranscriptionId;
+                if (canOpenDropdown) {
+                    this._openTransformDropdown();
+                } else {
+                    console.warn('🪄 Transform request not actionable (state='
+                        + this.currentState + ') — treating press as record toggle');
+                    this.handleRecordClick();
+                }
             });
         }
 

@@ -1255,7 +1255,13 @@ async function toggleRecording() {
   }
 
   // TRIPLE-TAP: If not recording AND a transcription just finished within 3s → open transform
-  if (!isRecording && lastTranscriptionTimestamp && (Date.now() - lastTranscriptionTimestamp) < 3000) {
+  // Only honor this when the widget is actually on screen: the user can only be
+  // "answering" the 3-2-1 countdown if they can see it. With auto-hide enabled a
+  // hidden widget means this press was meant to START a new recording — consuming
+  // it here silently swallowed the press and cost whole unrecorded stories
+  // (diagnosed 2026-07-29: 14 min spoken with no recording running).
+  if (!isRecording && lastTranscriptionTimestamp && (Date.now() - lastTranscriptionTimestamp) < 3000
+      && widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.isVisible()) {
     console.log('🪄 Triple-tap detected — opening transform dropdown');
     const savedId = lastTranscriptionId;
     lastTranscriptionTimestamp = null;
