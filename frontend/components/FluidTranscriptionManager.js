@@ -19,6 +19,13 @@ class FluidTranscriptionManager {
         this.workletNode = null;
         this.sourceNode = null;
 
+        // Every AudioContext this manager ever creates, until it is closed.
+        // Lets the post-story audit find and close contexts that escaped the
+        // normal teardown (see _auditContexts). An escaped context is not
+        // hypothetical: a stop()/start() race left one running for two days
+        // (2026-07-27 → 29), doubling the samples of every recording.
+        this._liveContexts = new Set();
+
         // PCM sample buffer (Float32 at AudioContext sampleRate, typically 48kHz)
         this.sampleBuffer = [];
         this.targetSampleRate = 16000; // Whisper optimal
@@ -64,8 +71,14 @@ class FluidTranscriptionManager {
         console.log(`🔄 Fluid transcription started: session=${this.sessionId}`);
 
         try {
+            // Heal any context a previous story failed to close BEFORE wiring a
+            // new graph — an orphaned worklet feeding the same mic would double
+            // this session's samples.
+            this._auditContexts();
+
             // Create AudioContext
             this.audioContext = new AudioContext({ sampleRate: 48000 });
+            this._liveContexts.add(this.audioContext);
 
             // Load worklet processor
             await this.audioContext.audioWorklet.addModule('../frontend/components/fluid-worklet-processor.js');
@@ -158,14 +171,34 @@ class FluidTranscriptionManager {
             this.chunkTimer = null;
         }
 
+        // Detach this session's audio graph from the instance NOW, before any
+        // await. stop() used to clean up via this.* AFTER its awaits — so a
+        // start() arriving during those awaits (cancel + quick re-record) had
+        // its fresh graph clobbered by the old cleanup, while the old context
+        // kept running forever with a live worklet. That orphan doubled the
+        // samples of every later recording. Locals make cleanup target THIS
+        // session's graph no matter what the instance fields point to by then.
+        const ctx = this.audioContext;
+        const node = this.workletNode;
+        const src = this.sourceNode;
+        this.audioContext = null;
+        this.workletNode = null;
+        this.sourceNode = null;
+
+        // Freeze the buffer feed at the stop press: everything up to now is
+        // already in sampleBuffer; anything later belongs to no session.
+        if (node) node.port.onmessage = null;
+
         // Send final chunk (whatever remains in buffer)
         await this._sendChunk();
 
         // Wait for all pending chunk transcriptions
         await Promise.allSettled(this.pendingChunks);
 
-        // Cleanup audio resources
-        this._cleanup();
+        // Cleanup audio resources (this session's graph, then a sweep for
+        // anything a previous story may have leaked)
+        this._closeGraph(ctx, node, src);
+        this._auditContexts();
 
         // Assemble result with overlap deduplication
         const failedCount = this.segments.filter(s => s.status === 'error').length;
@@ -178,7 +211,12 @@ class FluidTranscriptionManager {
             }
         }
 
+        // Drop successful-but-empty segments (e.g. Gemini's [NO_SPEECH] sentinel
+        // maps to empty text). Without this an all-empty session would assemble
+        // to "<seg></seg>", read as non-empty downstream, and get saved as a
+        // garbage transcription instead of hitting the empty-audio UX.
         const assembledText = sorted
+            .filter(s => s.status === 'error' || (s.text && s.text.trim()))
             .map(s => {
                 if (s.status === 'error') {
                     return `<seg status="error">[transcription failed]</seg>`;
@@ -520,20 +558,49 @@ class FluidTranscriptionManager {
     }
 
     /**
-     * Clean up AudioContext and nodes.
+     * Clean up the CURRENT instance graph (start()-failure path).
      */
     _cleanup() {
-        if (this.workletNode) {
-            try { this.workletNode.disconnect(); } catch (e) { /* ignore */ }
-            this.workletNode = null;
+        this._closeGraph(this.audioContext, this.workletNode, this.sourceNode);
+        this.audioContext = null;
+        this.workletNode = null;
+        this.sourceNode = null;
+    }
+
+    /**
+     * Close a specific audio graph. Takes explicit references (not this.*) so a
+     * stop() that raced with a start() still tears down its OWN session's graph.
+     */
+    _closeGraph(ctx, node, src) {
+        if (node) {
+            node.port.onmessage = null;
+            try { node.disconnect(); } catch (e) { /* ignore */ }
         }
-        if (this.sourceNode) {
-            try { this.sourceNode.disconnect(); } catch (e) { /* ignore */ }
-            this.sourceNode = null;
+        if (src) {
+            try { src.disconnect(); } catch (e) { /* ignore */ }
         }
-        if (this.audioContext && this.audioContext.state !== 'closed') {
-            try { this.audioContext.close(); } catch (e) { /* ignore */ }
-            this.audioContext = null;
+        if (ctx) {
+            if (ctx.state !== 'closed') {
+                try { ctx.close(); } catch (e) { /* ignore */ }
+            }
+            this._liveContexts.delete(ctx);
+        }
+    }
+
+    /**
+     * Post-story audit: close any context this manager created that is still
+     * running and is not the active session's. Self-heals the orphan-worklet
+     * state instead of letting it silently double every later recording.
+     */
+    _auditContexts() {
+        for (const ctx of this._liveContexts) {
+            if (ctx === this.audioContext) continue;
+            if (ctx.state !== 'closed') {
+                console.error('🧹 Fluid audit: closing orphaned AudioContext '
+                    + `(state=${ctx.state}) — a previous story did not tear down cleanly`);
+                try { ctx.close(); } catch (e) { /* ignore */ }
+            }
+            this._liveContexts.delete(ctx);
         }
     }
 }
