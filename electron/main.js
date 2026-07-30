@@ -34,6 +34,19 @@ if (!fs.existsSync(LOG_DIR)) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
+// Keep ONE previous session's log before overwriting. A user reports a problem
+// after restarting the app — which is exactly when the log that explains it gets
+// destroyed. This happened: the session that lost a whole story to a swallowed
+// shortcut press could not be confirmed afterwards because main.log had already
+// been overwritten. One rotation is enough to diagnose "it just happened".
+try {
+  if (fs.existsSync(LOG_FILE)) {
+    fs.renameSync(LOG_FILE, path.join(LOG_DIR, 'main.log.1'));
+  }
+} catch (e) {
+  // Non-fatal: if rotation fails we still want a live log
+}
+
 // Create write stream (mode 'w' = overwrite on each launch)
 const logStream = fs.createWriteStream(LOG_FILE, { flags: 'w' });
 
@@ -2370,6 +2383,19 @@ ipcMain.handle('update-shortcut', async (event, shortcutName, shortcutValue) => 
 // ============================================================================
 // OPEN LOG FOLDER HANDLER
 // ============================================================================
+
+// Renderer -> main.log bridge.
+// main.log only ever captured the MAIN process console, so everything the widget
+// and main-window renderers logged existed only in DevTools — invisible the
+// moment you actually need it (a user reporting a problem is not going to have
+// DevTools open). Renderers use this for ANOMALIES ONLY, not narration: main.log
+// stays readable because it contains decisions and warnings, not a play-by-play.
+ipcMain.on('renderer-log', (event, level, source, message) => {
+  const line = `[${source}] ${message}`;
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+});
 
 ipcMain.handle('open-log-folder', async (event, logType) => {
   const { shell } = require('electron');

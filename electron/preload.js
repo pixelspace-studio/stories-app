@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     requestWidgetHide: () => ipcRenderer.invoke('request-widget-hide'),
     updateShortcut: (shortcutName, shortcutValue) => ipcRenderer.invoke('update-shortcut', shortcutName, shortcutValue),
     openLogFolder: (logType) => ipcRenderer.invoke('open-log-folder', logType),
+    // Forward a renderer anomaly into main.log (see ipcMain 'renderer-log').
+    // Fire-and-forget so logging can never block or throw in a UI path.
+    logToMain: (level, source, message) => ipcRenderer.send('renderer-log', level, source, message),
     openAudioFolder: () => ipcRenderer.invoke('open-audio-folder'),
 
     // Smart Transforms

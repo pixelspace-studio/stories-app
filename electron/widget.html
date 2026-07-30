@@ -279,17 +279,38 @@
         /* Transcription progress percentage styling */
         /* Live voice bars next to the timer while recording. Driven by
            _animateWidgetVisualizer() from the real mic signal — if these don't
-           move while you speak, the mic is NOT hearing you. */
+           move while you speak, the mic is NOT hearing you.
+           Collapsed by default; `.active` makes them occupy the row. When
+           recording stops they STAY in the row at rest (minimum height, gray,
+           no movement) — removing them mid-row left the widget window at its
+           recording width with visibly empty space. */
         .widget-visualizer {
-            display: none;
+            display: flex;
             gap: 2px;
             align-items: center;
             height: 16px;
             flex-shrink: 0;
+            width: 0;
+            opacity: 0;
+            overflow: hidden;
+            pointer-events: none;
+            transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                        width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .widget-visualizer.active {
-            display: flex;
+            /* 3 bars x 3px + 2 gaps x 2px = 13px, plus 2px of extra breathing
+               room before the cancel button (row gap is 8px everywhere else) */
+            width: 13px;
+            opacity: 1;
+            margin-right: 2px;
+        }
+
+        /* Compact widget: collapse like the timer and cancel button do */
+        .widget-container.compact #widgetVisualizer {
+            width: 0;
+            opacity: 0;
+            margin-right: 0;
         }
 
         .widget-visualizer .wv-bar {
@@ -297,7 +318,8 @@
             height: 4px;
             background: rgba(255, 255, 255, 0.55);
             border-radius: 2px;
-            transition: height 0.08s ease-out;
+            flex-shrink: 0;
+            transition: height 0.08s ease-out, background 0.15s ease;
         }
 
         .timer.transcription-progress {

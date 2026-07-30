@@ -9,6 +9,19 @@
  * The existing MediaRecorder is NOT touched — this runs in parallel.
  */
 
+/**
+ * Forward an anomaly to main.log via the preload bridge, so audio problems are
+ * diagnosable from a log file instead of only from an open DevTools window.
+ * Anomalies only — this must never become a play-by-play.
+ */
+function fluidLogToMain(level, message) {
+    try {
+        if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.logToMain) {
+            window.electronAPI.logToMain(level, 'fluid', message);
+        }
+    } catch (e) { /* logging must never break a recording */ }
+}
+
 class FluidTranscriptionManager {
     constructor(apiClient, backendUrl) {
         this.api = apiClient;
@@ -25,6 +38,15 @@ class FluidTranscriptionManager {
         // hypothetical: a stop()/start() race left one running for two days
         // (2026-07-27 → 29), doubling the samples of every recording.
         this._liveContexts = new Set();
+
+        // Capture-rate self-check state. The 2026-07-27 orphan-worklet bug fed
+        // this buffer at twice the context's sample rate for two days and the
+        // only symptom was degraded transcription quality — it had to be
+        // reconstructed later from chunk byte sizes in the backend log. These
+        // counters let the renderer notice it on the first chunk instead.
+        this._rawSamplesReceived = 0;
+        this._captureStartMs = 0;
+        this._rateWarned = false;
 
         // PCM sample buffer (Float32 at AudioContext sampleRate, typically 48kHz)
         this.sampleBuffer = [];
@@ -67,6 +89,9 @@ class FluidTranscriptionManager {
         this.sampleBuffer = [];
         this._active = true;
         this._paused = false;
+        this._rawSamplesReceived = 0;
+        this._captureStartMs = 0;
+        this._rateWarned = false;
 
         console.log(`🔄 Fluid transcription started: session=${this.sessionId}`);
 
@@ -93,6 +118,8 @@ class FluidTranscriptionManager {
             this.workletNode.port.onmessage = (event) => {
                 if (event.data.type === 'samples') {
                     const samples = event.data.samples;
+                    if (this._captureStartMs === 0) this._captureStartMs = performance.now();
+                    this._rawSamplesReceived += samples.length;
                     for (let i = 0; i < samples.length; i++) {
                         this.sampleBuffer.push(samples[i]);
                     }
@@ -282,6 +309,27 @@ class FluidTranscriptionManager {
 
         // Retain overlap for next chunk (last 2s at source sample rate)
         const sourceSampleRate = this.audioContext ? this.audioContext.sampleRate : 48000;
+
+        // Capture-rate sanity check: samples must arrive at the context's sample
+        // rate. If they don't, every downstream assumption breaks silently — the
+        // WAV header lies about its own duration, the STT engine hears the audio
+        // at the wrong speed, and the 2s overlap is not 2s. Report once per
+        // session with the numbers needed to act on it.
+        const elapsedSec = this._captureStartMs
+            ? (performance.now() - this._captureStartMs) / 1000 : 0;
+        if (!this._rateWarned && elapsedSec > 3) {
+            const measuredRate = this._rawSamplesReceived / elapsedSec;
+            const ratio = measuredRate / sourceSampleRate;
+            if (Math.abs(ratio - 1) > 0.1) {
+                this._rateWarned = true;
+                const msg = `⚠️ Capture rate anomaly: receiving ${Math.round(measuredRate)} samples/s `
+                    + `but AudioContext reports ${sourceSampleRate} Hz (${ratio.toFixed(2)}x). `
+                    + `Audio sent to the STT engine will be time-distorted. `
+                    + `session=${this.sessionId}`;
+                console.error(msg);
+                fluidLogToMain('error', msg);
+            }
+        }
         const overlapSamples = this.overlapSec * sourceSampleRate;
         if (this.sampleBuffer.length > overlapSamples) {
             this.sampleBuffer = this.sampleBuffer.slice(this.sampleBuffer.length - overlapSamples);
@@ -596,8 +644,11 @@ class FluidTranscriptionManager {
         for (const ctx of this._liveContexts) {
             if (ctx === this.audioContext) continue;
             if (ctx.state !== 'closed') {
-                console.error('🧹 Fluid audit: closing orphaned AudioContext '
-                    + `(state=${ctx.state}) — a previous story did not tear down cleanly`);
+                const msg = '🧹 Fluid audit: closed an orphaned AudioContext '
+                    + `(state=${ctx.state}) — a previous story did not tear down cleanly. `
+                    + 'Audio would have been duplicated on the next recording.';
+                console.error(msg);
+                fluidLogToMain('error', msg);
                 try { ctx.close(); } catch (e) { /* ignore */ }
             }
             this._liveContexts.delete(ctx);

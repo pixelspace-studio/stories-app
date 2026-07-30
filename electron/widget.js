@@ -282,7 +282,7 @@ class WidgetApp {
                 this.cancelButton.style.opacity = '1';
                 this.timerDisplay.style.opacity = '1';
                 if (window.electronAPI && window.electronAPI.resizeWidget) {
-                    window.electronAPI.resizeWidget(152, 40); // fire-and-forget, no await
+                    window.electronAPI.resizeWidget(154, 40); // fire-and-forget, no await
                 }
             }
 
@@ -1381,6 +1381,10 @@ class WidgetApp {
     // ---- Transform State Handlers ----
 
     _showTransformReadyState() {
+        // Transform layout replaces the recording row (adds the wand button and
+        // resizes) — give the voice bars' width back so it stays tight
+        this._teardownWidgetVisualizer(true);
+
         // Stop any transcription progress interval
         if (this.transcriptionProgressInterval) {
             clearInterval(this.transcriptionProgressInterval);
@@ -1528,6 +1532,13 @@ class WidgetApp {
             }
         }
         if (liveCount > 0) console.log(`🛑 Released ${liveCount} live mic track(s)`);
+        // More than one live track means streams accumulated across recordings —
+        // the leak this method exists to prevent, coming back. Worth a log file
+        // entry; the normal single-track case is not.
+        if (liveCount > 1 && window.electronAPI && window.electronAPI.logToMain) {
+            window.electronAPI.logToMain('warn', 'widget',
+                `⚠️ Released ${liveCount} live mic tracks at once — mic streams are accumulating`);
+        }
         this._micStreams = [];
     }
 
@@ -1566,17 +1577,35 @@ class WidgetApp {
             const avg = band.reduce((a, b) => a + b, 0) / band.length;
             const norm = Math.min(avg / 128, 1);
             bar.style.height = `${4 + norm * 12}px`;
+            // Accent pink near the top of the band — same 0.7 threshold the
+            // main window's visualizer uses, so both read as one instrument
+            bar.style.background = norm > 0.7 ? 'var(--color-pink)' : '';
         });
         this._vizRaf = requestAnimationFrame(() => this._animateWidgetVisualizer());
     }
 
-    _teardownWidgetVisualizer() {
+    /**
+     * Stop driving the bars. By default they REMAIN in the row at rest —
+     * minimum height, gray, no movement — because the widget window keeps its
+     * recording width for a moment after the stop press, and pulling the bars
+     * out of the row left visibly empty space. Pass collapse=true when the row
+     * itself is being rebuilt (going inactive/compact, or entering the transform
+     * layout) so they give their width back.
+     */
+    _teardownWidgetVisualizer(collapse = false) {
         if (this._vizRaf) {
             cancelAnimationFrame(this._vizRaf);
             this._vizRaf = null;
         }
-        const el = document.getElementById('widgetVisualizer');
-        if (el) el.classList.remove('active');
+        // Reset to the resting state: shortest bars, no accent
+        document.querySelectorAll('#widgetVisualizer .wv-bar').forEach(bar => {
+            bar.style.height = '4px';
+            bar.style.background = '';
+        });
+        if (collapse) {
+            const el = document.getElementById('widgetVisualizer');
+            if (el) el.classList.remove('active');
+        }
         if (this._vizSource) {
             try { this._vizSource.disconnect(); } catch (e) { /* ignore */ }
             this._vizSource = null;
@@ -1591,7 +1620,7 @@ class WidgetApp {
     async showInactiveState() {
         // ---- Post-story cleanup protocol: release the mic + analyser ----
         this._releaseMicStreams();
-        this._teardownWidgetVisualizer();
+        this._teardownWidgetVisualizer(true); // row is collapsing to compact
 
         // ---- Clean up ALL transform state ----
         this._clearTransformCountdown();
@@ -1668,7 +1697,7 @@ class WidgetApp {
     async showStartingState() {
         // Expanded widget - 130x40 (horizontal layout)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(152, 40);
+            await window.electronAPI.resizeWidget(154, 40);
         }
         
         this.widgetContainer.classList.remove('compact');
@@ -1702,7 +1731,7 @@ class WidgetApp {
         // Use 'down' (keep position) in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             const dir = this.isInstructionMode ? 'down' : undefined;
-            await window.electronAPI.resizeWidget(152, 40, dir);
+            await window.electronAPI.resizeWidget(154, 40, dir);
         }
 
         this.widgetContainer.classList.remove('compact');
@@ -1730,7 +1759,7 @@ class WidgetApp {
     async showRecordingActiveState() {
         // Same as recording state, but DON'T re-animate button (already showing stop)
         if (window.electronAPI && window.electronAPI.resizeWidget) {
-            await window.electronAPI.resizeWidget(152, 40);
+            await window.electronAPI.resizeWidget(154, 40);
         }
         
         this.widgetContainer.classList.remove('compact');
@@ -1788,7 +1817,7 @@ class WidgetApp {
         // Use 'down' in instruction/prompt mode to avoid jumping
         if (window.electronAPI && window.electronAPI.resizeWidget) {
             const dir = this.isInstructionMode ? 'down' : undefined;
-            await window.electronAPI.resizeWidget(152, 40, dir);
+            await window.electronAPI.resizeWidget(154, 40, dir);
         }
 
         this.widgetContainer.classList.remove('compact');
@@ -2124,8 +2153,12 @@ class WidgetApp {
                 if (canOpenDropdown) {
                     this._openTransformDropdown();
                 } else {
-                    console.warn('🪄 Transform request not actionable (state='
-                        + this.currentState + ') — treating press as record toggle');
+                    const msg = '🪄 Transform request not actionable (state='
+                        + this.currentState + ') — treating press as record toggle';
+                    console.warn(msg);
+                    if (window.electronAPI && window.electronAPI.logToMain) {
+                        window.electronAPI.logToMain('warn', 'widget', msg);
+                    }
                     this.handleRecordClick();
                 }
             });
