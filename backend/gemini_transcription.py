@@ -6,6 +6,7 @@ returning a RetryResult-compatible object so the existing app flow does not chan
 """
 
 import os
+import re
 import sys
 import logging
 import mimetypes
@@ -110,7 +111,17 @@ def transcribe_with_gemini(
 
     base_instruction = (
         "Generate a verbatim transcript of the speech in the audio. "
-        "Return only the transcript text, no preamble, no commentary, no timestamps."
+        "Return only the transcript text, no preamble, no commentary, no timestamps.\n"
+        # No-speech sentinel. Without it, Gemini free-associates on unintelligible
+        # audio — and with a vocabulary hint present it tends to echo the hint
+        # words as the "transcript" (observed live: a mic-rustle recording came
+        # back as the user's dictionary word "Pixelspace"). Tested 2026-07-29 on
+        # that same recording: 8/8 runs returned the sentinel, 0 false positives
+        # on real-speech controls.
+        "If the audio contains no intelligible human speech — silence, background "
+        "noise, microphone rustle, or sounds you cannot resolve into words — do "
+        "NOT guess and do NOT invent text. Return exactly this and nothing else: "
+        "[NO_SPEECH]"
     )
     if prompt:
         # `prompt` arrives in Whisper-prompt format, typically the literal
@@ -219,6 +230,14 @@ def transcribe_with_gemini(
             )
 
         text = (getattr(response, 'text', None) or '').strip()
+
+        # Map the no-speech sentinel to empty text so it flows through the app's
+        # existing empty-audio handling (widget shows nothing was transcribed)
+        # instead of pasting a literal "[NO_SPEECH]" into the user's clipboard.
+        # Tolerant match: models occasionally drop the brackets or add a period.
+        if re.fullmatch(r'\[?no[_ ]?speech\]?\.?', text, re.IGNORECASE):
+            logger.info("🔇 Gemini reported no intelligible speech — returning empty text")
+            text = ''
         duration = audio_duration if audio_duration else None
 
         cost_usd = 0.0

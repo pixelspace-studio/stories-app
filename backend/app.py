@@ -785,6 +785,19 @@ def transcribe_audio():
                     transcription_data.get('text', '')
                 )
 
+                # No speech in the recording (e.g. Gemini's [NO_SPEECH] sentinel
+                # maps to empty text, or Whisper returned nothing). Surface it as
+                # an explicit error instead of saving an empty transcription —
+                # the user needs to know their words were NOT captured.
+                if not transcription_data.get('text', '').strip():
+                    logger.warning("🔇 Transcription succeeded but contains no speech — reporting to user")
+                    return jsonify({
+                        "error": "No speech was detected in the recording. "
+                                 "Check that the right microphone is selected and try again.",
+                        "no_speech": True,
+                        "audio_id": audio_id,
+                    }), 422
+
                 # Skip saving if ephemeral (e.g., instruction mode for custom transforms)
                 ephemeral = request.form.get('ephemeral', 'false').lower() == 'true'
                 if not ephemeral:
