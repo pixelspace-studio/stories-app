@@ -474,7 +474,11 @@ class WidgetApp {
                 console.error('🚨 Error name:', event.error?.name);
                 console.error('🚨 Error message:', event.error?.message);
                 console.error('🚨 MediaRecorder state:', this.mediaRecorder?.state);
-                
+                if (window.electronAPI && window.electronAPI.logToMain) {
+                    window.electronAPI.logToMain('error', 'widget',
+                        `🚨 MediaRecorder error: name=${event.error?.name} message=${event.error?.message} state=${this.mediaRecorder?.state}`);
+                }
+
                 // Cancel recording due to error
                 this.cancelRecording('media_recorder_error');
             };
@@ -487,7 +491,11 @@ class WidgetApp {
                     console.error('🚨 Track state:', audioTracks[0].readyState);
                     console.error('🚨 Track enabled:', audioTracks[0].enabled);
                     console.error('🚨 Track muted:', audioTracks[0].muted);
-                    
+                    if (window.electronAPI && window.electronAPI.logToMain) {
+                        window.electronAPI.logToMain('error', 'widget',
+                            `🚨 Audio track ended unexpectedly: state=${audioTracks[0].readyState} enabled=${audioTracks[0].enabled} muted=${audioTracks[0].muted} label="${audioTracks[0].label}"`);
+                    }
+
                     // Cancel recording if track ends while recording
                     if (this.isRecording && this.mediaRecorder?.state === 'recording') {
                         this.cancelRecording('audio_track_ended');
@@ -496,6 +504,11 @@ class WidgetApp {
                 
                 audioTracks[0].onmute = () => {
                     console.warn('⚠️ Audio track muted');
+                    // A track muting right after start = something else grabbed the
+                    // mic — prime suspect for the under-30s spontaneous cancels.
+                    if (window.electronAPI && window.electronAPI.logToMain) {
+                        window.electronAPI.logToMain('warn', 'widget', '⚠️ Audio track muted');
+                    }
                 };
                 
                 audioTracks[0].onunmute = () => {
@@ -1179,6 +1192,13 @@ class WidgetApp {
         const duration = this.startTime ? Math.round((Date.now() - this.startTime) / 1000) : 0;
         console.log(`🚨 Recording cancelled: ${reason} | Duration: ${duration}s`);
         console.log('🎛️ Recording source:', this.recordingSource);
+        // Cancellations discard audio silently, and the reason only existed in
+        // DevTools — main.log showed 5 spontaneous cancels (2026-08-04/05) that
+        // were indistinguishable. Every cancel is an anomaly worth the bridge.
+        if (window.electronAPI && window.electronAPI.logToMain) {
+            window.electronAPI.logToMain('warn', 'widget',
+                `🚨 Recording cancelled: reason=${reason} duration=${duration}s source=${this.recordingSource}`);
+        }
         
         // Check who's recording
         if (this.recordingSource === 'widget') {
@@ -1246,6 +1266,10 @@ class WidgetApp {
     async forceStopRecording(reason = 'manual') {
         const duration = this.startTime ? Math.round((Date.now() - this.startTime) / 1000) : 0;
         console.error(`🚨 Force stop: ${reason} | Duration: ${duration}s`);
+        if (window.electronAPI && window.electronAPI.logToMain) {
+            window.electronAPI.logToMain('warn', 'widget',
+                `🚨 Force stop: reason=${reason} duration=${duration}s source=${this.recordingSource}`);
+        }
         
         // Clear any existing timeouts
         if (this.safetyTimeout) {

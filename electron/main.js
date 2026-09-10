@@ -1469,9 +1469,14 @@ async function toggleRecording() {
 }
 
 function cancelRecording() {
+  // This only ever fires from the global cancel shortcut. It used to fire with
+  // no log at all — a silent global ⌘⌃C killing recordings was indistinguishable
+  // from a mic failure in main.log (5 phantom cancels, 2026-08-04/05).
+  console.log(`🚫 Cancel shortcut fired: ${SHORTCUT_DEFAULTS.CANCEL} (global) — sending cancel to widget`);
+
   // DON'T show widget here - it's already visible during recording
   // Auto-hide logic in widget.js will handle hiding after cancel
-  
+
   // Send cancel command to widget window
   if (widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.webContents && !widgetWindow.webContents.isDestroyed()) {
     widgetWindow.webContents.send('shortcut-triggered', 'cancel-recording');
