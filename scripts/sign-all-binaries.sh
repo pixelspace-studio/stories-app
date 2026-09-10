@@ -98,6 +98,25 @@ done
 echo "✅ Python .so extensions signed"
 echo ""
 
+# Step 2.75: Sign frameworks nested inside the PyInstaller onedir bundle.
+# PyInstaller ships Python.framework under Resources/stories-backend/_internal/.
+# Step 4 below only walks Contents/Frameworks, so these were never signed and
+# Apple rejected the whole archive for them ("signature of the binary is invalid",
+# "does not include a secure timestamp"). Sign the versioned binary first, then
+# the framework bundle — signing the bundle alone leaves the inner Mach-O ad-hoc.
+echo "🧩 Step 2.75: Signing frameworks nested in the backend bundle..."
+find "$APP_PATH/Contents/Resources" -type d -name "*.framework" 2>/dev/null | while read -r fw; do
+    fw_name="$(basename "$fw" .framework)"
+    find "$fw/Versions" -maxdepth 2 -type f -name "$fw_name" 2>/dev/null | while read -r fw_bin; do
+        sign_file "$fw_bin" "no"
+    done
+    echo "  📝 Signing framework bundle: $(basename "$fw")"
+    codesign --force --sign "$IDENTITY" --options runtime --timestamp "$fw" \
+        2>&1 | grep -v "replacing existing signature" || true
+done
+echo "✅ Nested frameworks signed"
+echo ""
+
 # Step 3: Sign specific executables with entitlements
 echo "⚙️  Step 3: Signing executables..."
 
