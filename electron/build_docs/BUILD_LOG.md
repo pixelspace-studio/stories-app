@@ -49,3 +49,13 @@ Changes:
 2. **Renderer → `main.log` bridge.** `main.log` only ever captured the main process console, so every widget and main-window renderer log lived in DevTools alone — useless when a user reports a problem. New `renderer-log` IPC channel + `window.electronAPI.logToMain()`. Anomalies only, on purpose: `main.log` is valuable because it holds decisions and warnings, not narration.
 3. **Capture-rate self-check.** The fluid manager counts samples actually delivered by the worklet and compares them against the `AudioContext`'s reported rate, reporting a >10% deviation once per session with both numbers. The 2026-07-27 orphan-worklet bug ran at double rate for two days with no symptom but degraded transcripts and had to be reconstructed from chunk byte sizes afterwards; this names it on the first chunk.
 4. **`main.log` keeps one rotation** (`main.log.1`). A user restarts before reporting, which is exactly when the log explaining the problem was being destroyed — the story lost to a swallowed shortcut press could not be confirmed afterwards for this reason.
+
+| 0.9.10-13 | internal (signed + notarized) | Arturo | 2026-09-09 | fix/recording-reliability | [`built/0.9.10-13`](../../../../tree/built/0.9.10-13) | [GitHub release](https://github.com/pixelspace-studio/stories-app/releases/tag/built/0.9.10-13) |
+
+Purpose: catch the spontaneous-cancel bug in the act. Recordings die on their own mid-speech (5 cases 2026-08-04/05, 5 more 2026-09-09: 3 s to 63 s in). The reason instrumentation written on 2026-08-05 was never committed, so `-11` and `-12` shipped without it; the dev build ran with it for six weeks and never reproduced, then the installed `-12` reproduced five times in one afternoon and its `main.log` could not say why.
+
+Changes:
+1. **Every cancel reason reaches `main.log`.** `cancelRecording(reason)` / `forceStopRecording(reason)` with duration and source, MediaRecorder `onerror`, audio track `onended` / `onmute`, and the global ⌘⌃C cancel shortcut in `main.js` (which used to fire with no log at all). Next occurrence: `grep "Recording cancelled: reason=" main.log`.
+2. **Signing script signs `Python.framework` inside the PyInstaller bundle** (step 2.75) — it lives under `Resources/stories-backend/_internal/`, outside the `Contents/Frameworks` walk, and Apple had rejected earlier archives for it. `NOTARIZATION.md` added with the protocol and incident history.
+
+SHA-256: `fe3db33ce8fc29a4a325375b220def53e390605a8125c9f54d6d13f85d9535b1`
