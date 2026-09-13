@@ -59,3 +59,14 @@ Changes:
 2. **Signing script signs `Python.framework` inside the PyInstaller bundle** (step 2.75) — it lives under `Resources/stories-backend/_internal/`, outside the `Contents/Frameworks` walk, and Apple had rejected earlier archives for it. `NOTARIZATION.md` added with the protocol and incident history.
 
 SHA-256: `fe3db33ce8fc29a4a325375b220def53e390605a8125c9f54d6d13f85d9535b1`
+
+| 0.9.10-14 | internal (signed + notarized) | Arturo | 2026-09-12 | fix/recording-reliability | [`built/0.9.10-14`](../../../../tree/built/0.9.10-14) | [GitHub release](https://github.com/pixelspace-studio/stories-app/releases/tag/built/0.9.10-14) |
+
+Purpose: fix the first cause of "the recording stopped on its own" that `-13`'s diagnostics exposed, and instrument the second.
+
+Changes:
+1. **Cancelled recordings no longer leave a live 20-minute timer.** `cancelRecording()` never cleared the `MAX_RECORDING_MINUTES` safety timeout, so every cancel armed a timer that force-stopped whatever recording was in progress 20:00 later. Confirmed twice on 2026-09-12 (stories cut at 92 s and 85 s, each exactly 20:00 after the start of an earlier cancelled recording).
+2. **Widget position persists.** Three fetches in `main.js` hardcoded port 5002; the backend runs on the detected `backendPort`. The dragged position was never saved or restored, so the widget reset to the top-right corner on every launch.
+3. **The cancel button logs the click it received** — `isTrusted`, `detail`, pointer type, screen coordinates, document focus and active element — so the next `reason=cancel_button` cancel says whether it came from a device, from the keyboard, or from code. Still open: who clicks the X.
+
+SHA-256: `a68f2b527edb55291ce82c9f12a4f25f360876c0ce13665d610671e6e9385b4e`
