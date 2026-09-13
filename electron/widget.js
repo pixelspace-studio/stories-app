@@ -1230,7 +1230,18 @@ class WidgetApp {
             console.log('⏱️ Stopping timer...');
             this.stopTimer();
             console.log('✅ Timer stopped');
-            
+
+            // Disarm the MAX_RECORDING_MINUTES safety timeout. stopRecording and
+            // forceStopRecording already do this; cancel never did, so every
+            // cancelled recording left a live 20-minute timer that later
+            // force-stopped whatever recording was in progress at that moment
+            // (2026-09-12: two stories cut at 92 s and 85 s, each exactly 20:00
+            // after the start of a recording cancelled earlier).
+            if (this.safetyTimeout) {
+                clearTimeout(this.safetyTimeout);
+                this.safetyTimeout = null;
+            }
+
             // Reset state and button IMMEDIATELY (don't wait for backend)
             console.log('🔄 Resetting state...');
             this.isProcessing = false;
