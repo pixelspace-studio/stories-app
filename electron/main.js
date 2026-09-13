@@ -290,7 +290,12 @@ async function createWidgetWindow(shouldHide = false) {
   let widgetPosition = null;
   
   try {
-    const response = await fetch('http://127.0.0.1:5002/api/window/widget/position');
+    // backendPort is already detected here: startBackendServer() resolves before
+    // createWidgetWindow() runs. This used to hardcode 5002, which never matched
+    // the real port, so the saved position was never read (and never written,
+    // see saveWidgetPosition below) and the widget fell back to the top-right
+    // corner on every launch.
+    const response = await fetch(`http://127.0.0.1:${backendPort}/api/window/widget/position`);
     if (response.ok) {
       const data = await response.json();
       widgetPosition = data.position;
@@ -392,7 +397,7 @@ async function createWidgetWindow(shouldHide = false) {
     
     // Save position to backend
     try {
-      await fetch('http://127.0.0.1:5002/api/window/widget/position', {
+      await fetch(`http://127.0.0.1:${backendPort}/api/window/widget/position`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ x: bounds.x, y: bounds.y })
@@ -2078,7 +2083,7 @@ let isRecording = false;
 // ====================================
 
 ipcMain.handle('get-backend-url', () => {
-  return 'http://127.0.0.1:5002';
+  return `http://127.0.0.1:${backendPort}`;
 });
 
 ipcMain.handle('set-always-on-top', async (event, alwaysOnTop) => {
