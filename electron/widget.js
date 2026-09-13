@@ -80,6 +80,21 @@ class WidgetApp {
         this.cancelButton.addEventListener('click', (event) => {
             event.stopPropagation();
             event.preventDefault();
+            // Recordings have been cancelled by this button with the user certain
+            // they never touched it (2026-09-09/12). Record what kind of click
+            // this was: isTrusted=false means dispatched by code, not a device;
+            // detail=0 with a trusted event means keyboard activation (Space/
+            // Enter on a focused button); pointerType and screen coordinates
+            // locate a real pointer click; hasFocus/activeElement say whether
+            // the widget window was key and what element held focus.
+            if (this.isRecording && window.electronAPI && window.electronAPI.logToMain) {
+                const active = document.activeElement;
+                window.electronAPI.logToMain('warn', 'widget',
+                    `🖱️ Cancel button click: isTrusted=${event.isTrusted} detail=${event.detail} ` +
+                    `pointerType=${event.pointerType || 'n/a'} button=${event.button} ` +
+                    `screen=(${event.screenX},${event.screenY}) client=(${event.clientX},${event.clientY}) ` +
+                    `hasFocus=${document.hasFocus()} activeElement=${active ? (active.id || active.tagName) : 'none'}`);
+            }
             // In transform states, cancel = dismiss transform mode
             if (this.currentState.startsWith('transform_')) {
                 this.setWidgetState('inactive');
